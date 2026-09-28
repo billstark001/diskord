@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"diskord/internal/securefs"
+
 	"gopkg.in/yaml.v3"
 )
 

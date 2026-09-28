@@ -44,6 +44,20 @@ func TestBackgroundRejectsConfigOutsideWorkingDirectory(t *testing.T) {
 	}
 }
 
+func TestDiscordBundleUsesLaunchServicesArguments(t *testing.T) {
+	binary := "/Applications/Discord.app/Contents/MacOS/Discord"
+	if got := discordAppBundle(binary); got != "/Applications/Discord.app" {
+		t.Fatalf("bundle: %q", got)
+	}
+	if got := discordAppBundle("/usr/bin/discord"); got != "" {
+		t.Fatalf("non-bundle executable: %q", got)
+	}
+	args := discordOpenArgs("/Applications/Discord.app", "/tmp/discord.log", []string{"--proxy-server=http://127.0.0.1:3901", "--disable-quic"})
+	if strings.Join(args, "|") != "-a|/Applications/Discord.app|--stdin|"+os.DevNull+"|--stdout|/tmp/discord.log|--stderr|/tmp/discord.log|--args|--proxy-server=http://127.0.0.1:3901|--disable-quic" {
+		t.Fatalf("open arguments: %q", args)
+	}
+}
+
 func TestLaunchHelperProcess(t *testing.T) {
 	if os.Getenv("DISKORD_TEST_LAUNCH_HELPER") != "1" {
 		return

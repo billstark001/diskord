@@ -61,7 +61,7 @@ Visit the test channel, send a message with a unique marker, and search for it i
 
 First exit completely, including the Windows tray app or any process still running on macOS. Closing only the window usually does not guarantee launch arguments are reapplied. After confirming exit, start the actual Discord program, not an updater or old shortcut that may swallow arguments.
 
-From the runtime directory, `./diskord discord launch` (or `.\\diskord.exe discord launch` on Windows) searches typical installation paths and starts the client with the configured proxy. Use `--path EXECUTABLE` for a custom installation. This command can capture the client's stdout and stderr in `logs/discord-<UTC-start-time>.log` when `logging.discord.enabled` is set in YAML. The platform commands below are alternatives when you prefer to launch the client directly.
+From the runtime directory, `./diskord discord launch` (or `.\\diskord.exe discord launch` on Windows) searches typical installation paths and starts the client with the configured proxy. On macOS, an app-bundled Discord is started through Launch Services to preserve its app identity for privacy attribution. Use `--path EXECUTABLE` for a custom installation. This command can capture the client's stdout and stderr in `logs/discord-<UTC-start-time>.log` when `logging.discord.enabled` is set in YAML. The platform commands below are alternatives when you prefer to launch the client directly.
 
 On macOS, search the usual system and user application folders, then let Launch Services start the app independently of this terminal:
 
