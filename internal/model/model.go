@@ -85,9 +85,18 @@ type MessageRow struct {
 	Deleted                                                    bool
 	Attachments                                                []AssetRow
 }
+type GuildRow struct {
+	ID, Name             string
+	Unavailable, Deleted bool
+}
+type ChannelRow struct {
+	ID, GuildID, ParentID, Name string
+	Kind                        int
+	Deleted                     bool
+}
 type AssetRow struct{ Name, Hash string }
 type Filter struct {
-	Query, GuildID, ChannelID, Before string
-	Limit                             int
+	Query, GuildID, ChannelID, Before, Scope string
+	Limit                                    int
 }
 type Counts struct{ Users, Guilds, Channels, Messages int64 }

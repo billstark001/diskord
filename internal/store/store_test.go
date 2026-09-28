@@ -52,3 +52,64 @@ func TestMergingTombstonesAndFKs(t *testing.T) {
 		t.Fatal("tombstone resurrected")
 	}
 }
+
+func TestNavigationAndScopedMessages(t *testing.T) {
+	r := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(k, os.Getenv(k))
+	}
+	if err := securefs.Prepare(r); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	category := 4
+	batch := model.Batch{Source: "ws",
+		Guilds: []model.Guild{{ID: "1", Name: model.Ptr("Server")}},
+		Channels: []model.Channel{
+			{ID: "2", GuildID: model.Ptr("1"), Name: model.Ptr("Category"), Type: &category},
+			{ID: "3", GuildID: model.Ptr("1"), ParentID: model.Ptr("2"), Name: model.Ptr("General")},
+			{ID: "4", Name: model.Ptr("DM")},
+		},
+		Messages: []model.Message{
+			{ID: "10", ChannelID: model.Ptr("3"), Content: model.Ptr("server message")},
+			{ID: "11", ChannelID: model.Ptr("4"), Content: model.Ptr("dm message")},
+		},
+	}
+	if err := s.Apply(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	guilds, err := s.Guilds(ctx)
+	if err != nil || len(guilds) != 1 || guilds[0].Name != "Server" {
+		t.Fatalf("guild navigation: %+v, %v", guilds, err)
+	}
+	channels, err := s.Channels(ctx, "1")
+	if err != nil || len(channels) != 2 {
+		t.Fatalf("guild channels: %+v, %v", channels, err)
+	}
+	var found bool
+	for _, channel := range channels {
+		if channel.ID == "3" && channel.ParentID == "2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("category relation lost: %+v", channels)
+	}
+	dms, err := s.Channels(ctx, "")
+	if err != nil || len(dms) != 1 || dms[0].ID != "4" {
+		t.Fatalf("dm channels: %+v, %v", dms, err)
+	}
+	rows, err := s.Messages(ctx, model.Filter{Scope: "dm"})
+	if err != nil || len(rows) != 1 || rows[0].ID != "11" {
+		t.Fatalf("dm messages: %+v, %v", rows, err)
+	}
+	rows, err = s.Messages(ctx, model.Filter{GuildID: "1", ChannelID: "3"})
+	if err != nil || len(rows) != 1 || rows[0].ID != "10" {
+		t.Fatalf("channel messages: %+v, %v", rows, err)
+	}
+}

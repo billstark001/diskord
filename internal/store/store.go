@@ -292,6 +292,47 @@ func (s *Store) Counts(ctx context.Context) (model.Counts, error) {
 	e := s.reader.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM users),(SELECT count(*) FROM guilds),(SELECT count(*) FROM channels),(SELECT count(*) FROM messages)").Scan(&c.Users, &c.Guilds, &c.Channels, &c.Messages)
 	return c, e
 }
+func (s *Store) Guilds(ctx context.Context) ([]model.GuildRow, error) {
+	rows, err := s.reader.QueryContext(ctx, `SELECT id, COALESCE(name,''), unavailable, deleted FROM guilds ORDER BY lower(COALESCE(name,id)), id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []model.GuildRow{}
+	for rows.Next() {
+		var item model.GuildRow
+		if err := rows.Scan(&item.ID, &item.Name, &item.Unavailable, &item.Deleted); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+func (s *Store) Channels(ctx context.Context, guildID string) ([]model.ChannelRow, error) {
+	if guildID != "" && !model.ID(guildID) {
+		return nil, errors.New("invalid guild ID")
+	}
+	query := `SELECT id, COALESCE(guild_id,''), COALESCE(parent_id,''), COALESCE(name,''), COALESCE(kind,-1), deleted FROM channels WHERE guild_id IS NULL ORDER BY lower(COALESCE(name,id)), id`
+	args := []any{}
+	if guildID != "" {
+		query = `SELECT id, COALESCE(guild_id,''), COALESCE(parent_id,''), COALESCE(name,''), COALESCE(kind,-1), deleted FROM channels WHERE guild_id=? ORDER BY lower(COALESCE(name,id)), id`
+		args = append(args, guildID)
+	}
+	rows, err := s.reader.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []model.ChannelRow{}
+	for rows.Next() {
+		var item model.ChannelRow
+		if err := rows.Scan(&item.ID, &item.GuildID, &item.ParentID, &item.Name, &item.Kind, &item.Deleted); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
 func (s *Store) Messages(ctx context.Context, f model.Filter) ([]model.MessageRow, error) {
 	if f.Limit < 1 || f.Limit > 100 {
 		f.Limit = 50
@@ -310,13 +351,15 @@ func (s *Store) Messages(ctx context.Context, f model.Filter) ([]model.MessageRo
 	if model.ID(f.GuildID) {
 		where = append(where, "c.guild_id=?")
 		args = append(args, f.GuildID)
+	} else if f.Scope == "dm" {
+		where = append(where, "c.guild_id IS NULL")
 	}
 	if model.ID(f.Before) {
 		where = append(where, "m.sort_key<?")
 		args = append(args, model.SortKey(f.Before))
 	}
 	args = append(args, f.Limit)
-	query := `SELECT m.id,COALESCE(m.channel_id,''),COALESCE(c.name,c.id,'未知频道'),COALESCE(g.name,CASE WHEN c.guild_id IS NULL THEN '私信 / 未知服务器' ELSE c.guild_id END),COALESCE(u.display_name,u.username,u.id,'未知用户'),COALESCE(m.content,''),COALESCE(m.created_at,''),COALESCE(m.edited_at,''),m.source,m.deleted FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN guilds g ON g.id=c.guild_id LEFT JOIN users u ON u.id=m.author_id WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.sort_key DESC LIMIT ?`
+	query := `SELECT m.id,COALESCE(m.channel_id,''),COALESCE(c.name,c.id,''),COALESCE(g.name,c.guild_id,''),COALESCE(u.display_name,u.username,u.id,''),COALESCE(m.content,''),COALESCE(m.created_at,''),COALESCE(m.edited_at,''),m.source,m.deleted FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN guilds g ON g.id=c.guild_id LEFT JOIN users u ON u.id=m.author_id WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.sort_key DESC LIMIT ?`
 	rows, e := s.reader.QueryContext(ctx, query, args...)
 	if e != nil {
 		return nil, e
