@@ -19,3 +19,8 @@ resources:
   enabled: false
   max_bytes: 8388608
   max_total_bytes: 536870912
+logging:
+  file:
+    enabled: false # Rotating diskord logs in runtime_dir/logs/.
+  discord:
+    enabled: false # Capture Discord stdout/stderr when started by `diskord discord launch`.

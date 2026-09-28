@@ -44,6 +44,14 @@ type Config struct {
 		MaxBytes      int   `yaml:"max_bytes"`
 		MaxTotalBytes int64 `yaml:"max_total_bytes"`
 	} `yaml:"resources"`
+	Logging struct {
+		File struct {
+			Enabled bool `yaml:"enabled"`
+		} `yaml:"file"`
+		Discord struct {
+			Enabled bool `yaml:"enabled"`
+		} `yaml:"discord"`
+	} `yaml:"logging"`
 }
 
 const Example = `# diskord: all relative runtime paths are resolved under runtime_dir.
@@ -67,6 +75,11 @@ resources:
   enabled: false
   max_bytes: 8388608
   max_total_bytes: 536870912
+logging:
+  file:
+    enabled: false # Rotating diskord logs in runtime_dir/logs/.
+  discord:
+    enabled: false # Capture Discord stdout/stderr when started by diskord discord launch.
 `
 
 func Default() Config { var c Config; _ = yaml.Unmarshal([]byte(Example), &c); return c }
@@ -231,7 +244,7 @@ func (m *Manager) Patch(expected string, changes map[string]any, validate func(C
 		return Config{}, e
 	}
 	// Fixed ordering makes YAML updates deterministic and preserves unrelated nodes/comments.
-	for _, k := range []string{"ca.cert", "ca.key", "resources.enabled"} {
+	for _, k := range []string{"ca.cert", "ca.key", "resources.enabled", "logging.file.enabled", "logging.discord.enabled"} {
 		if v, ok := changes[k]; ok {
 			if e = patch(node.Content[0], strings.Split(k, "."), v); e != nil {
 				return Config{}, e
@@ -239,7 +252,7 @@ func (m *Manager) Patch(expected string, changes map[string]any, validate func(C
 		}
 	}
 	for k := range changes {
-		if k != "ca.cert" && k != "ca.key" && k != "resources.enabled" {
+		if k != "ca.cert" && k != "ca.key" && k != "resources.enabled" && k != "logging.file.enabled" && k != "logging.discord.enabled" {
 			return Config{}, fmt.Errorf("field %s requires a manual edit and restart", k)
 		}
 	}
@@ -261,6 +274,8 @@ func (m *Manager) Patch(expected string, changes map[string]any, validate func(C
 	baseline.CA.Cert = c.CA.Cert
 	baseline.CA.Key = c.CA.Key
 	baseline.Resources.Enabled = c.Resources.Enabled
+	baseline.Logging.File.Enabled = c.Logging.File.Enabled
+	baseline.Logging.Discord.Enabled = c.Logging.Discord.Enabled
 	if baseline != c {
 		return Config{}, errors.New("restart-only settings changed on disk; restart diskord before saving")
 	}

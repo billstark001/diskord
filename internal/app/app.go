@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"diskord/internal/ca"
 	"diskord/internal/capture"
 	"diskord/internal/config"
 	"diskord/internal/gateway"
+	"diskord/internal/logfile"
 	"diskord/internal/mitm"
 	"diskord/internal/securefs"
 	"diskord/internal/store"
@@ -28,6 +32,15 @@ func Run(ctx context.Context, path string) error {
 	}
 	defer lock.Close()
 	c := m.Current()
+	if c.Logging.File.Enabled {
+		writer, err := logfile.Open(m.Root, "diskord")
+		if err != nil {
+			return fmt.Errorf("open diskord file logger: %w", err)
+		}
+		defer writer.Close()
+		log.SetOutput(io.MultiWriter(os.Stderr, writer))
+		defer log.SetOutput(os.Stderr)
+	}
 	if c.CA.Cert == "" {
 		return errors.New("no CA selected; run diskord ca issue, then diskord ca select before starting the proxy")
 	}
@@ -74,7 +87,8 @@ func Run(ctx context.Context, path string) error {
 	go func() { failures <- control.Serve() }()
 	go func() { failures <- front.Serve() }()
 	go func() { failures <- <-backend.Errors }()
-	fmt.Printf("diskord v0.1\nRuntime: %s\nProxy: http://%s\nUI: http://%s\nUse 'diskord --config <yaml-path> ui-token' to retrieve the console token.\nCapture is passive; Ctrl+C stops the proxy.\n", m.Root, c.Proxy.Listen, c.Web.Listen)
+	log.Printf("diskord v0.1; runtime=%s proxy=http://%s ui=http://%s", m.Root, c.Proxy.Listen, c.Web.Listen)
+	fmt.Println("Use 'diskord --config <yaml-path> ui-token' to retrieve the console token. Capture is passive; Ctrl+C stops the proxy.")
 	select {
 	case <-ctx.Done():
 		return nil

@@ -29,6 +29,9 @@ Usage:
   diskord [--config diskord.yaml] ca issue --cert ca/root.pem --key ca/root.key
   diskord [--config diskord.yaml] ca select --cert ca/root.pem --key ca/root.key
   diskord [--config diskord.yaml] config set resources.enabled true|false
+  diskord [--config diskord.yaml] config set logging.file.enabled true|false
+  diskord [--config diskord.yaml] config set logging.discord.enabled true|false
+  diskord [--config diskord.yaml] discord launch [--path EXECUTABLE]
   diskord [--config diskord.yaml] doctor
   diskord [--config diskord.yaml] ui-token
   diskord [--config diskord.yaml] run
@@ -108,6 +111,12 @@ func run(args []string) error {
 	if args[0] == "doctor" {
 		return doctor(m)
 	}
+	if args[0] == "discord" {
+		if len(args) < 2 || args[1] != "launch" {
+			return errors.New("use discord launch [--path EXECUTABLE]")
+		}
+		return launchDiscord(m, args[2:])
+	}
 	lock, e := securefs.Acquire(m.Root)
 	if e != nil {
 		return fmt.Errorf("%w; while running, use the authenticated web controls", e)
@@ -154,14 +163,14 @@ func run(args []string) error {
 			return errors.New("unknown CA operation")
 		}
 	case "config":
-		if len(args) != 4 || args[1] != "set" || args[2] != "resources.enabled" {
-			return errors.New("supported incremental setting: config set resources.enabled true|false; select certificates using ca select")
+		if len(args) != 4 || args[1] != "set" || (args[2] != "resources.enabled" && args[2] != "logging.file.enabled" && args[2] != "logging.discord.enabled") {
+			return errors.New("supported settings: resources.enabled, logging.file.enabled, logging.discord.enabled; select certificates using ca select")
 		}
 		enabled, e := strconv.ParseBool(args[3])
 		if e != nil {
 			return e
 		}
-		_, e = m.Patch(m.Revision(), map[string]any{"resources.enabled": enabled}, nil)
+		_, e = m.Patch(m.Revision(), map[string]any{args[2]: enabled}, nil)
 		if e != nil {
 			return e
 		}
