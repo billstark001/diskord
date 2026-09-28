@@ -1,0 +1,88 @@
+name: build-and-release
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - name: Build and test
+        run: ./scripts/build.sh
+      - name: Lint and race tests
+        run: ./scripts/verify.sh
+      - name: Check files in GitHub source archives
+        shell: bash
+        run: |
+          git ls-files --error-unmatch go.mod go.sum internal/ui/views_templ.go internal/ui/static/htmx.min.js
+          git diff --exit-code -- go.mod go.sum internal/ui/views_templ.go internal/ui/static/htmx.min.js
+
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, target_os: darwin, target_arch: arm64}
+          - {runner: ubuntu-latest, target_os: darwin, target_arch: amd64}
+          - {runner: windows-latest, target_os: windows, target_arch: amd64}
+          - {runner: ubuntu-latest, target_os: windows, target_arch: arm64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - name: Build on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build.ps1 -TargetOS ${{ matrix.target_os }} -TargetArch ${{ matrix.target_arch }}
+      - name: Build on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          TARGET_GOOS: ${{ matrix.target_os }}
+          TARGET_GOARCH: ${{ matrix.target_arch }}
+        run: ./scripts/build.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: diskord-${{ matrix.target_os }}-${{ matrix.target_arch }}
+          path: dist/diskord-*
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [verify, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: diskord-*
+          path: dist
+          merge-multiple: true
+      - name: Publish tagged release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          assets=(
+            dist/diskord-darwin-arm64
+            dist/diskord-darwin-amd64
+            dist/diskord-windows-amd64.exe
+            dist/diskord-windows-arm64.exe
+          )
+          for asset in "${assets[@]}"; do test -s "$asset"; done
+          options=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then options+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag --generate-notes "${options[@]}"

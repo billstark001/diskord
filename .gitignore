@@ -1,0 +1,17 @@
+# Generated output and default runtime paths at the repository root only.
+/.build/
+/dist/
+/diskord.yaml
+/runtime/
+/ca/
+/db/
+/state/
+/tmp/
+/resources/
+/profiles/
+
+# Sensitive database and key files remain ignored at any depth.
+*.sqlite*
+*.key
+*.p12
+*.pfx

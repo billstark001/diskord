@@ -1,0 +1,128 @@
+package ui
+
+templ Login(csrf string, problem string) {
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+		<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>diskord · 本地控制台</title><link rel="stylesheet" href="/static/app.css"/></head>
+		<body class="login">
+			<main class="login-card">
+				<div class="eyebrow">LOCAL / PRIVATE / EXPLICIT</div>
+				<h1>diskord<span class="dot">.</span></h1>
+				<p>本地消息观察站</p>
+				<p class="muted">在本机终端执行 <code>diskord ui-token</code> 获取访问令牌。不要分享运行时目录或 CA 私钥。</p>
+				if problem != "" {
+					<p class="notice error">{ problem }</p>
+				}
+				<form action="/login" method="post"><input type="hidden" name="csrf" value={ csrf }/><label>控制台访问令牌<input type="password" name="token" required autocomplete="off"/></label><button type="submit">进入控制台 →</button></form>
+				<small>仅用于本人设备、本人账号或已获授权的本地流量。</small>
+			</main>
+		</body>
+	</html>
+}
+
+templ Page(v View) {
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width,initial-scale=1"/>
+			<meta name="htmx-config" content='{"history":"reload","mode":"same-origin","includeIndicatorCSS":false,"noSwap":[204,304,"4xx","5xx"]}'/>
+			<title>diskord · 本地控制台</title>
+			<link rel="stylesheet" href="/static/app.css"/><script src="/static/htmx.min.js" defer></script>
+		</head>
+		<body hx-history="false">
+			<header class="top"><a class="brand" href="/">diskord<span class="dot">.</span></a><span class="pill">LOCAL ONLY</span><nav><a href="/">概览</a><a href="/messages">消息</a><a href="/settings">设置与证书</a></nav><form action="/logout" method="post"><input type="hidden" name="csrf" value={ v.CSRF }/><button class="quiet" type="submit">退出</button></form></header>
+			<main class="container">
+				if v.Notice != "" {
+					<div class="notice">{ v.Notice }</div>
+				}
+				if v.Error != "" {
+					<div class="notice error">{ v.Error }</div>
+				}
+				switch v.Page {
+					case "overview":
+						<div class="eyebrow">OBSERVE, DON'T REPLAY</div>
+						<h1>你的本地消息档案。</h1>
+						<p class="lead">只保存实体与关系。没有原始流量库，不采集客户端认证帧，不主动拉取历史消息。</p>
+						@Status(v)
+						<section class="panel"><h2>常驻连接</h2><dl><dt>HTTP 代理</dt><dd><code>{ v.Config.Proxy.Listen }</code></dd><dt>控制台</dt><dd><code>{ v.Config.Web.Listen }</code></dd><dt>运行时目录</dt><dd><code>{ v.RuntimeDir }</code></dd><dt>资源文件</dt><dd>{ Label(v.Config.Resources.Enabled) } · 仅被动缓存已经过代理的安全图像类型</dd></dl><p class="muted">关闭网页不会停止代理。应用不自动修改系统代理或根证书信任。非目标域名只进行 CONNECT 隧道转发。</p></section>
+					case "messages":
+						<div class="eyebrow">COLLECTED MESSAGES</div>
+						<h1>消息</h1>
+						<p class="muted">每页 50 条，按消息 ID 倒序。只显示本机实际观察到的数据；未知关系会在后续事件中补全。</p>
+						<form class="search panel" action="/messages" method="get"><label>内容<input type="search" name="q" value={ v.Filter.Query } maxlength="256" placeholder="搜索已收集消息"/></label><label>服务器 ID<input name="guild" value={ v.Filter.GuildID } inputmode="numeric"/></label><label>频道 ID<input name="channel" value={ v.Filter.ChannelID } inputmode="numeric"/></label><button type="submit">筛选</button><a href="/messages">重置</a></form>
+						@MessageList(v)
+					case "settings":
+						<div class="eyebrow">EXPLICIT CONTROLS</div>
+						<h1>设置与证书</h1>
+						<p class="lead">修改采用 YAML 节点级补丁与原子替换。并发更改会被拒绝，不会静默覆盖。</p>
+						<section class="panel"><h2>资源收集</h2><form action="/settings" method="post"><input type="hidden" name="csrf" value={ v.CSRF }/><input type="hidden" name="revision" value={ v.Revision }/><label class="check"><input type="checkbox" name="resources" checked?={ v.Config.Resources.Enabled }/>允许保存 CDN 图像资源</label><p class="muted">关闭时不拦截新的 CDN 连接，也不展示缓存。不会主动下载；旧文件不会自动删除。拒绝 SVG、HTML 与任意第三方域名。</p><button type="submit">保存设置</button></form></section>
+						<section class="panel"><h2>当前 CA</h2><dl><dt>证书</dt><dd><code>{ v.Config.CA.Cert }</code></dd><dt>私钥</dt><dd><code>{ v.Config.CA.Key }</code></dd><dt>SHA-256 指纹</dt><dd class="break"><code>{ v.Fingerprint }</code></dd><dt>有效期至</dt><dd>{ v.Expires }</dd></dl><p class="muted">只在内存中签发站点叶证书。更换 CA 后，请手动调整信任并重新连接客户端。</p></section>
+						<section class="panel">
+							<h2>验证并选择已签发 CA</h2>
+							<form action="/ca/select" method="post">
+								<input type="hidden" name="csrf" value={ v.CSRF }/><input type="hidden" name="revision" value={ v.Revision }/><label>证书路径<input name="cert" list="certs" value={ v.Config.CA.Cert } required/></label>
+								<datalist id="certs">
+									for _, path := range v.CAFiles {
+										<option value={ path }></option>
+									}
+								</datalist><label>私钥路径<input name="key" value={ v.Config.CA.Key } required/></label><button type="submit">校验并选择</button>
+							</form>
+						</section>
+						<section class="panel"><h2>签发新的根 CA</h2><p class="muted">调用已配置的系统 OpenSSL；没有工具链即报错。必须指定运行目录内的两个不同文件路径，绝不覆盖现有文件，也不会自动安装信任。</p><form action="/ca/issue" method="post"><input type="hidden" name="csrf" value={ v.CSRF }/><label>输出证书路径<input name="cert" placeholder="ca/diskord-root.pem" required/></label><label>输出私钥路径<input name="key" placeholder="ca/diskord-root.key" required/></label><button type="submit">签发 CA</button></form></section>
+				}
+			</main>
+			<footer>diskord v0.1 · 本地授权观察 · HTTP + Gateway → SQLite · 原型，不保证无遗漏</footer>
+		</body>
+	</html>
+}
+
+templ Status(v View) {
+	<section id="status" hx-get="/status" hx-trigger="every 5s" hx-swap="outerHTML">
+		<div class="stats"><article><span>用户</span><strong>{ Num(v.Counts.Users) }</strong></article><article><span>服务器</span><strong>{ Num(v.Counts.Guilds) }</strong></article><article><span>频道</span><strong>{ Num(v.Counts.Channels) }</strong></article><article><span>消息</span><strong>{ Num(v.Counts.Messages) }</strong></article></div>
+		<div class="panel">
+			<h2>采集健康状态</h2>
+			<div class="health"><span>WS 连接 <b>{ Num(v.Stats.ActiveGateway) }</b></span><span>HTTP 已解析 <b>{ Num(v.Stats.HTTPBodies) }</b></span><span>Gateway 已解析 <b>{ Num(v.Stats.GatewayEvents) }</b></span><span>提交批次 <b>{ Num(v.Stats.BatchesCommitted) }</b></span><span>缓存资源 <b>{ Num(v.Stats.Assets) }</b></span></div>
+			<div class="health warnings"><span>队列丢弃 { Num(v.Stats.DroppedBatches) }</span><span>HTTP 跳过 { Num(v.Stats.HTTPDropped) }</span><span>WS 采集失步 { Num(v.Stats.GatewayLost) }</span><span>不支持的 WS 编码 { Num(v.Stats.UnsupportedGateway) }</span><span>解析错误 { Num(v.Stats.DecodeErrors) }</span><span>存储错误 { Num(v.Stats.StoreErrors) }</span><span>资源配额跳过 { Num(v.Stats.AssetSkipped) }</span></div>
+			<small>计数自本次启动开始。队列满或解码失败不会阻塞消息转发；非零错误意味着档案可能不完整。无 JavaScript 时可手动刷新。</small>
+		</div>
+	</section>
+}
+
+templ MessageList(v View) {
+	<section id="messages">
+		<div class="list-heading"><span>{ Num(len(v.Rows)) } 条消息</span><a href={ NextURL(v.Filter, v.Filter.Before) } hx-get={ FragmentURL(v.Filter) } hx-target="#messages" hx-swap="outerHTML">刷新</a></div>
+		if len(v.Rows) == 0 {
+			<div class="empty panel"><h2>还没有匹配的消息</h2><p>确认 CA 已信任、客户端已显式使用代理，然后在 Discord 中打开频道。代理不会补抓未经过本机的历史流量。</p></div>
+		}
+		for _, m := range v.Rows {
+			<article class="message panel">
+				<div class="message-meta"><strong>{ m.AuthorName }</strong><span>{ m.GuildName } / { m.ChannelName }</span><span class="tag">{ m.Source }</span></div>
+				<div class="message-body">{ m.Content }</div>
+				if m.Deleted {
+					<span class="deleted">已观察到删除事件 · 本地档案保留最后已知内容</span>
+				}
+				for _, a := range m.Attachments {
+					<div class="attachment">
+						if a.Hash != "" && v.Config.Resources.Enabled {
+							<img src={ "/assets/" + a.Hash } alt={ a.Name } loading="lazy"/>
+						}
+						<span>{ a.Name }</span>
+						if a.Hash == "" {
+							<small>资源未缓存</small>
+						}
+					</div>
+				}
+				<div class="message-foot">
+					<time>{ m.Timestamp }</time><code>{ m.ID }</code>
+					if m.EditedTimestamp != "" {
+						<span>已编辑 { m.EditedTimestamp }</span>
+					}
+				</div>
+			</article>
+		}
+		if v.Next != "" {
+			<a class="button" href={ v.Next }>查看更早的消息 →</a>
+		}
+	</section>
+}

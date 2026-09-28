@@ -1,0 +1,21 @@
+# diskord: all relative runtime paths are resolved under runtime_dir.
+version: 1
+runtime_dir: . # '.' means the process working directory, NOT the YAML directory.
+web:
+  listen: 127.0.0.1:3900
+proxy:
+  listen: 127.0.0.1:3901
+  max_connections: 128
+ca:
+  cert: ""
+  key: ""
+  openssl: openssl # An executable name in PATH, or an explicit absolute path.
+capture:
+  max_http_bytes: 8388608
+  max_event_bytes: 16777216
+  queue: 128
+  raw: false # v0.1 rejects true: no raw traffic database exists.
+resources:
+  enabled: false
+  max_bytes: 8388608
+  max_total_bytes: 536870912
