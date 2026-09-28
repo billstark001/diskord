@@ -53,6 +53,15 @@ func TestHTTPAndSignedAttachment(t *testing.T) {
 		t.Fatal(b, e)
 	}
 }
+func TestGuildSearchResults(t *testing.T) {
+	b, e := HTTP("/api/v9/guilds/123/messages/search", []byte(`{"messages":[[{"id":"789","channel_id":"456","guild_id":"123","content":"found","author":{"id":"321","username":"member"}}]],"total_results":1}`))
+	if e != nil || len(b.Messages) != 1 || len(b.Channels) != 1 || len(b.Guilds) != 0 {
+		t.Fatalf("search results were not projected: %+v, %v", b, e)
+	}
+	if b.Messages[0].ID != "789" || b.Channels[0].GuildID == nil || *b.Channels[0].GuildID != "123" {
+		t.Fatalf("search message lost guild relationship: %+v", b)
+	}
+}
 func TestOutageNotDeletion(t *testing.T) {
 	b, e := Gateway([]byte(`{"op":0,"t":"GUILD_DELETE","d":{"id":"1","unavailable":true}}`))
 	if e != nil || b.Guilds[0].Deleted != nil {
