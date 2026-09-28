@@ -22,6 +22,7 @@ import (
 )
 
 func Run(ctx context.Context, path string) error {
+	started := time.Now()
 	m, e := config.New(path)
 	if e != nil {
 		return e
@@ -33,7 +34,7 @@ func Run(ctx context.Context, path string) error {
 	defer lock.Close()
 	c := m.Current()
 	if c.Logging.File.Enabled {
-		writer, err := logfile.Open(m.Root, "diskord")
+		writer, err := logfile.OpenAt(m.Root, "diskord", started)
 		if err != nil {
 			return fmt.Errorf("open diskord file logger: %w", err)
 		}
@@ -41,6 +42,7 @@ func Run(ctx context.Context, path string) error {
 		log.SetOutput(io.MultiWriter(os.Stderr, writer))
 		defer log.SetOutput(os.Stderr)
 	}
+	log.Printf("diskord process started at %s", started.Format(time.RFC3339Nano))
 	if c.CA.Cert == "" {
 		return errors.New("no CA selected; run diskord ca issue, then diskord ca select before starting the proxy")
 	}

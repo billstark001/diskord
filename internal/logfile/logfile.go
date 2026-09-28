@@ -2,9 +2,11 @@ package logfile
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"diskord/internal/securefs"
 )
@@ -13,70 +15,67 @@ const MaxBytes int64 = 10 << 20
 const Backups = 3
 
 type Writer struct {
-	mu         sync.Mutex
-	root, name string
-	file       *os.File
-	size       int64
+	mu   sync.Mutex
+	root string
+	path string
+	file *os.File
+	size int64
 }
 
-func path(root, name string) (string, error) {
-	if name != "diskord" && name != "discord" {
-		return "", errors.New("invalid log name")
+// OpenOutputAt creates a private log file for one invocation.
+func OpenOutputAt(root, name string, started time.Time) (*os.File, string, error) {
+	if name != "diskord" && name != "discord" && name != "diskord-bg" {
+		return nil, "", errors.New("invalid log name")
 	}
 	if _, err := securefs.Dir(root, "logs"); err != nil {
-		return "", err
+		return nil, "", err
 	}
-	return securefs.Within(root, filepath.Join("logs", name+".log"))
+	stamp := started.UTC().Format("20060102T150405.000000000Z")
+	for attempt := 0; attempt < 100; attempt++ {
+		filename := fmt.Sprintf("%s-%s.log", name, stamp)
+		if attempt > 0 {
+			filename = fmt.Sprintf("%s-%s-%d.log", name, stamp, attempt)
+		}
+		path, err := securefs.Within(root, filepath.Join("logs", filename))
+		if err != nil {
+			return nil, "", err
+		}
+		file, err := securefs.NewFile(path)
+		if err == nil {
+			return file, path, nil
+		}
+		if !os.IsExist(err) {
+			return nil, "", err
+		}
+	}
+	return nil, "", errors.New("too many logs with the same start timestamp")
 }
 
 func Open(root, name string) (*Writer, error) {
-	p, err := path(root, name)
+	return OpenAt(root, name, time.Now())
+}
+
+func OpenAt(root, name string, started time.Time) (*Writer, error) {
+	file, path, err := OpenOutputAt(root, name, started)
 	if err != nil {
 		return nil, err
 	}
-	w := &Writer{root: root, name: name}
-	if err = w.open(p); err != nil {
-		return nil, err
-	}
-	if w.size >= MaxBytes {
-		if err = w.rotate(); err != nil {
-			w.file.Close()
-			return nil, err
-		}
-	}
-	return w, nil
+	return &Writer{root: root, path: path, file: file}, nil
 }
-func (w *Writer) open(p string) error {
-	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
-	if err != nil {
-		return err
-	}
-	if err = securefs.Private(p); err != nil {
-		f.Close()
-		return err
-	}
-	info, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return err
-	}
-	w.file, w.size = f, info.Size()
-	return nil
-}
+
+func (w *Writer) Path() string { return w.path }
+
 func (w *Writer) rotate() error {
 	if err := w.file.Close(); err != nil {
 		return err
 	}
-	p, err := path(w.root, w.name)
-	if err != nil {
-		return err
-	}
+	var err error
 	for i := Backups; i > 0; i-- {
-		old := p
+		old := w.path
 		if i > 1 {
-			old += "." + string(rune('0'+i-1))
+			old += fmt.Sprintf(".%d", i-1)
 		}
-		newPath := p + "." + string(rune('0'+i))
+		newPath := fmt.Sprintf("%s.%d", w.path, i)
 		if _, err = securefs.Within(w.root, filepath.Join("logs", filepath.Base(old))); err != nil {
 			return err
 		}
@@ -90,7 +89,12 @@ func (w *Writer) rotate() error {
 			return err
 		}
 	}
-	return w.open(p)
+	file, err := securefs.NewFile(w.path)
+	if err != nil {
+		return err
+	}
+	w.file, w.size = file, 0
+	return nil
 }
 func (w *Writer) Write(data []byte) (int, error) {
 	w.mu.Lock()
