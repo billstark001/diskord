@@ -1,3 +1,5 @@
+.DS_Store
+
 # Generated output and default runtime paths at the repository root only.
 /.build/
 /dist/
