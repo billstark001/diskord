@@ -95,3 +95,54 @@ func TestMessageHTMLIsEscaped(t *testing.T) {
 		t.Fatal("missing escaped message")
 	}
 }
+
+func TestLocalesAndArchiveNavigation(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/messages", nil)
+	r.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	if requestLocale(r) != English {
+		t.Fatal("English language detection failed")
+	}
+	r.AddCookie(&http.Cookie{Name: "diskord_lang", Value: "zh-CN"})
+	if requestLocale(r) != Chinese {
+		t.Fatal("language preference did not override header")
+	}
+	v := View{Page: "messages", Locale: English, SelectedGuild: "1", SelectedChannel: "3", Filter: model.Filter{GuildID: "1", ChannelID: "3"}, Guilds: []model.GuildRow{{ID: "1", Name: "Server"}}, Channels: []model.ChannelRow{{ID: "2", Name: "Category", Kind: 4}, {ID: "3", ParentID: "2", Name: "General"}}}
+	var b bytes.Buffer
+	if err := Page(v).Render(context.Background(), &b); err != nil {
+		t.Fatal(err)
+	}
+	html := b.String()
+	for _, want := range []string{`lang="en"`, "All channels", "Category", "General", "/messages?guild=1&amp;channel=3"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q in English archive", want)
+		}
+	}
+	if strings.Contains(html, "尚未观察到") {
+		t.Fatal("untranslated archive text")
+	}
+}
+
+func TestLanguagePreferenceRequiresCSRFAndSafeRedirect(t *testing.T) {
+	u := &UI{csrf: "secret"}
+	for _, tt := range []struct {
+		form     string
+		status   int
+		location string
+	}{
+		{"csrf=secret&lang=en&next=%2Fmessages", 303, "/messages"},
+		{"csrf=secret&lang=en&next=https%3A%2F%2Fevil.test", 303, "/"},
+		{"csrf=wrong&lang=en&next=%2Fmessages", 403, ""},
+		{"csrf=secret&lang=fr&next=%2Fmessages", 400, ""},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/language", strings.NewReader(tt.form))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		u.language(w, r)
+		if w.Code != tt.status || w.Header().Get("Location") != tt.location {
+			t.Fatalf("%q: status %d, location %q", tt.form, w.Code, w.Header().Get("Location"))
+		}
+		if tt.location == "/messages" && !strings.Contains(w.Header().Get("Set-Cookie"), "diskord_lang=en") {
+			t.Fatal("language cookie missing")
+		}
+	}
+}

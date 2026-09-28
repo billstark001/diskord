@@ -33,12 +33,141 @@ var assets embed.FS
 type View struct {
 	Page, CSRF, Revision, Error, Notice, RuntimeDir, Fingerprint, Expires, Next string
 	CATrustNotice                                                               string
+	Locale                                                                      Locale
 	Config                                                                      config.Config
 	Counts                                                                      model.Counts
 	Stats                                                                       capture.Snapshot
 	Rows                                                                        []model.MessageRow
+	Guilds                                                                      []model.GuildRow
+	Channels                                                                    []model.ChannelRow
+	SelectedGuild, SelectedChannel                                              string
 	Filter                                                                      model.Filter
 	CAFiles                                                                     []string
+}
+
+func (v View) T(zh string) string { return v.Locale.T(zh) }
+func (v View) ChannelName(c model.ChannelRow) string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return v.T("未知频道") + " " + c.ID
+}
+func (v View) GuildName(g model.GuildRow) string {
+	if g.Name != "" {
+		return g.Name
+	}
+	return g.ID
+}
+func (v View) GuildTitle(g model.GuildRow) string {
+	name := v.GuildName(g)
+	if g.Deleted {
+		return name + " · " + v.T("已删除")
+	}
+	if g.Unavailable {
+		return name + " · " + v.T("不可用")
+	}
+	return name
+}
+func (v View) ChannelTitle(c model.ChannelRow) string {
+	name := v.ChannelName(c)
+	if c.Deleted {
+		return name + " · " + v.T("已删除")
+	}
+	return name
+}
+func (v View) MessageChannelName(m model.MessageRow) string {
+	if m.ChannelName != "" {
+		return m.ChannelName
+	}
+	return v.T("未知频道")
+}
+func (v View) MessageGuildName(m model.MessageRow) string {
+	if m.GuildName != "" {
+		return m.GuildName
+	}
+	return v.T("私信 / 未知服务器")
+}
+func (v View) AuthorName(m model.MessageRow) string {
+	if m.AuthorName != "" {
+		return m.AuthorName
+	}
+	return v.T("未知用户")
+}
+func (v View) Category(c model.ChannelRow) bool { return c.Kind == 4 }
+func (v View) ChildOf(c model.ChannelRow, parent string) bool {
+	return c.ParentID == parent && c.Kind != 4
+}
+func (v View) RootChannel(c model.ChannelRow) bool {
+	if c.Kind == 4 || c.ParentID == "" {
+		return c.Kind != 4
+	}
+	for _, other := range v.Channels {
+		if other.ID == c.ParentID && other.Kind == 4 {
+			return false
+		}
+	}
+	return true
+}
+func (v View) Initial(g model.GuildRow) string {
+	for _, r := range v.GuildName(g) {
+		return strings.ToUpper(string(r))
+	}
+	return "?"
+}
+func (v View) ActiveClass(active bool) string {
+	if active {
+		return "active"
+	}
+	return ""
+}
+func (v View) ScopeURL() string {
+	if v.SelectedGuild != "" {
+		return "/messages?guild=" + v.SelectedGuild
+	}
+	if v.Filter.Scope == "dm" {
+		return "/messages?scope=dm"
+	}
+	return "/messages"
+}
+func (v View) ChannelURL(id string) string {
+	if v.SelectedGuild != "" {
+		return "/messages?guild=" + v.SelectedGuild + "&channel=" + id
+	}
+	if v.Filter.Scope == "dm" {
+		return "/messages?scope=dm&channel=" + id
+	}
+	return "/messages?channel=" + id
+}
+func (v View) SidebarTitle() string {
+	if v.Filter.Scope == "dm" {
+		return v.T("私信与未知")
+	}
+	for _, g := range v.Guilds {
+		if g.ID == v.SelectedGuild {
+			return v.GuildName(g)
+		}
+	}
+	return v.T("服务器")
+}
+func (v View) ContentTitle() string {
+	for _, c := range v.Channels {
+		if c.ID == v.SelectedChannel {
+			return "# " + v.ChannelName(c)
+		}
+	}
+	if v.SelectedChannel != "" {
+		return "# " + v.SelectedChannel
+	}
+	if v.SelectedGuild != "" || v.Filter.Scope == "dm" {
+		return v.T("全部频道")
+	}
+	return v.T("消息")
+}
+func (v View) PagePath() string {
+	if v.Page == "overview" {
+		return ""
+	}
+	return v.Page
 }
 
 func Num(v any) string { return fmt.Sprint(v) }
@@ -47,6 +176,9 @@ func NextURL(f model.Filter, before string) string {
 	q.Set("q", f.Query)
 	q.Set("guild", f.GuildID)
 	q.Set("channel", f.ChannelID)
+	if f.Scope == "dm" {
+		q.Set("scope", "dm")
+	}
 	if before != "" {
 		q.Set("before", before)
 	}
@@ -140,6 +272,7 @@ func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store) (*UI,
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 	mux.HandleFunc("GET /login", u.loginPage)
 	mux.HandleFunc("POST /login", u.login)
+	mux.HandleFunc("POST /language", u.language)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		io.WriteString(w, "ok\n")
@@ -229,7 +362,9 @@ func (u *UI) csrfOK(w http.ResponseWriter, r *http.Request) bool {
 }
 func (u *UI) loginPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = Login(u.csrf, "").Render(r.Context(), w)
+	locale := requestLocale(r)
+	w.Header().Set("Content-Language", string(locale))
+	_ = Login(u.csrf, "", locale).Render(r.Context(), w)
 }
 func (u *UI) login(w http.ResponseWriter, r *http.Request) {
 	if !u.csrfOK(w, r) {
@@ -249,12 +384,29 @@ func (u *UI) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if subtle.ConstantTimeCompare([]byte(r.PostForm.Get("token")), []byte(u.token)) != 1 {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Language", string(requestLocale(r)))
 		w.WriteHeader(401)
-		_ = Login(u.csrf, "访问令牌不正确。").Render(r.Context(), w)
+		_ = Login(u.csrf, "访问令牌不正确。", requestLocale(r)).Render(r.Context(), w)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: "diskord_session", Value: u.session, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 12 * 3600})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+func (u *UI) language(w http.ResponseWriter, r *http.Request) {
+	if !u.csrfOK(w, r) {
+		return
+	}
+	lang := r.PostForm.Get("lang")
+	if lang != string(Chinese) && lang != string(English) {
+		http.Error(w, "invalid language", http.StatusBadRequest)
+		return
+	}
+	next := r.PostForm.Get("next")
+	if next != "/login" && next != "/" && next != "/messages" && next != "/settings" {
+		next = "/"
+	}
+	http.SetCookie(w, &http.Cookie{Name: "diskord_lang", Value: lang, Path: "/", SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 func (u *UI) logout(w http.ResponseWriter, r *http.Request) {
 	if !u.csrfOK(w, r) {
@@ -264,18 +416,19 @@ func (u *UI) logout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Clear-Site-Data", `"cache", "cookies", "storage"`)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
-func (u *UI) view(page string) View {
+func (u *UI) view(r *http.Request, page string) View {
 	a := u.Authority.Current()
-	return View{Page: page, CSRF: u.csrf, Revision: u.Manager.Revision(), RuntimeDir: u.Manager.Root, Config: u.Manager.Current(), Stats: u.Engine.Metrics.Snapshot(), Fingerprint: a.Fingerprint(), Expires: a.Root.NotAfter.Format(time.RFC3339)}
+	return View{Page: page, Locale: requestLocale(r), CSRF: u.csrf, Revision: u.Manager.Revision(), RuntimeDir: u.Manager.Root, Config: u.Manager.Current(), Stats: u.Engine.Metrics.Snapshot(), Fingerprint: a.Fingerprint(), Expires: a.Root.NotAfter.Format(time.RFC3339)}
 }
 func (u *UI) render(w http.ResponseWriter, r *http.Request, v View) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Language", string(v.Locale))
 	if e := Page(v).Render(r.Context(), w); e != nil {
 		return
 	}
 }
 func (u *UI) home(w http.ResponseWriter, r *http.Request) {
-	v := u.view("overview")
+	v := u.view(r, "overview")
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	counts, e := u.Store.Counts(ctx)
@@ -287,7 +440,7 @@ func (u *UI) home(w http.ResponseWriter, r *http.Request) {
 	u.render(w, r, v)
 }
 func (u *UI) status(w http.ResponseWriter, r *http.Request) {
-	v := u.view("overview")
+	v := u.view(r, "overview")
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	c, e := u.Store.Counts(ctx)
@@ -297,12 +450,20 @@ func (u *UI) status(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Counts = c
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Language", string(v.Locale))
 	_ = Status(v).Render(ctx, w)
 }
 func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
-	v := u.view("messages")
+	v := u.view(r, "messages")
 	q := r.URL.Query()
-	v.Filter = model.Filter{Query: q.Get("q"), GuildID: q.Get("guild"), ChannelID: q.Get("channel"), Before: q.Get("before"), Limit: 50}
+	v.Filter = model.Filter{Query: q.Get("q"), GuildID: q.Get("guild"), ChannelID: q.Get("channel"), Before: q.Get("before"), Scope: q.Get("scope"), Limit: 50}
+	if v.Filter.Scope != "" && v.Filter.Scope != "dm" {
+		http.Error(w, "invalid scope", http.StatusBadRequest)
+		return
+	}
+	if v.Filter.GuildID != "" {
+		v.Filter.Scope = ""
+	}
 	if len(v.Filter.Query) > 256 {
 		http.Error(w, "search query too long", http.StatusBadRequest)
 		return
@@ -315,6 +476,22 @@ func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+	var e error
+	if r.URL.Path != "/messages/fragment" {
+		v.Guilds, e = u.Store.Guilds(ctx)
+		if e != nil {
+			http.Error(w, "navigation temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if v.Filter.GuildID != "" || v.Filter.Scope == "dm" {
+			v.Channels, e = u.Store.Channels(ctx, v.Filter.GuildID)
+			if e != nil {
+				http.Error(w, "navigation temporarily unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
+	}
+	v.SelectedGuild, v.SelectedChannel = v.Filter.GuildID, v.Filter.ChannelID
 	rows, e := u.Store.Messages(ctx, v.Filter)
 	if e != nil {
 		http.Error(w, "message query temporarily unavailable", http.StatusServiceUnavailable)
@@ -325,6 +502,7 @@ func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
 		v.Next = NextURL(v.Filter, rows[len(rows)-1].ID)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Language", string(v.Locale))
 	if r.URL.Path == "/messages/fragment" {
 		_ = MessageList(v).Render(ctx, w)
 		return
@@ -333,11 +511,14 @@ func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
 }
 func (u *UI) settings(w http.ResponseWriter, r *http.Request) { u.settingsResult(w, r, "", "") }
 func (u *UI) settingsResult(w http.ResponseWriter, r *http.Request, notice, problem string) {
-	v := u.view("settings")
+	v := u.view(r, "settings")
 	v.Notice = notice
 	v.Error = problem
 	if !u.Authority.Current().TrustedForTLS() {
 		v.CATrustNotice = ca.TrustInstructions()
+		if v.Locale == English {
+			v.CATrustNotice = ca.TrustInstructionsEnglish()
+		}
 	}
 	if entries, e := os.ReadDir(filepath.Join(u.Manager.Root, "ca")); e == nil {
 		for _, f := range entries {

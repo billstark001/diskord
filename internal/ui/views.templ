@@ -1,20 +1,46 @@
 package ui
 
-templ Login(csrf string, problem string) {
+templ Login(csrf string, problem string, locale Locale) {
 	<!DOCTYPE html>
-	<html lang="zh-CN">
-		<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>diskord · 本地控制台</title><link rel="stylesheet" href="/static/app.css"/></head>
+	<html lang={ string(locale) }>
+		<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>{ locale.T("本地控制台") } · diskord</title><link rel="stylesheet" href="/static/app.css"/></head>
 		<body class="login">
 			<main class="login-card">
 				<div class="eyebrow">LOCAL / PRIVATE / EXPLICIT</div>
 				<h1>diskord<span class="dot">.</span></h1>
-				<p>本地消息观察站</p>
-				<p class="muted">在本机终端执行 <code>diskord ui-token</code> 获取访问令牌。不要分享运行时目录或 CA 私钥。</p>
+				<p>
+					{ locale.T("本地消息观察站") }
+				</p>
+				<p class="muted">
+					{ locale.T("在本机终端执行") } <code>diskord ui-token</code> { locale.T("获取访问令牌。不要分享运行时目录或 CA 私钥。") }
+				</p>
 				if problem != "" {
-					<p class="notice error">{ problem }</p>
+					<p class="notice error">
+						{ locale.T(problem) }
+					</p>
 				}
-				<form action="/login" method="post"><input type="hidden" name="csrf" value={ csrf }/><label>控制台访问令牌<input type="password" name="token" required autocomplete="off"/></label><button type="submit">进入控制台 →</button></form>
-				<small>仅用于本人设备、本人账号或已获授权的本地流量。</small>
+				<form action="/login" method="post">
+					<input type="hidden" name="csrf" value={ csrf }/>
+					<label>
+						{ locale.T("控制台访问令牌") }
+						<input type="password" name="token" required autocomplete="off"/>
+					</label>
+					<button type="submit">
+						{ locale.T("进入控制台 →") }
+					</button>
+				</form>
+				<form class="language" action="/language" method="post">
+					<input type="hidden" name="csrf" value={ csrf }/><input type="hidden" name="next" value="/login"/>
+					<label for="login-lang">
+						{ locale.T("语言") }
+					</label><select id="login-lang" name="lang"><option value="zh-CN" selected?={ locale == Chinese }>中文</option><option value="en" selected?={ locale == English }>English</option></select>
+					<button class="quiet" type="submit">
+						{ locale.T("保存设置") }
+					</button>
+				</form>
+				<small>
+					{ locale.T("仅用于本人设备、本人账号或已获授权的本地流量。") }
+				</small>
 			</main>
 		</body>
 	</html>
@@ -22,111 +48,499 @@ templ Login(csrf string, problem string) {
 
 templ Page(v View) {
 	<!DOCTYPE html>
-	<html lang="zh-CN">
+	<html lang={ string(v.Locale) }>
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width,initial-scale=1"/>
 			<meta name="htmx-config" content='{"history":"reload","mode":"same-origin","includeIndicatorCSS":false,"noSwap":[204,304,"4xx","5xx"]}'/>
-			<title>diskord · 本地控制台</title>
+			<title>{ v.T("本地控制台") } · diskord</title>
 			<link rel="stylesheet" href="/static/app.css"/><script src="/static/htmx.min.js" defer></script>
 		</head>
 		<body hx-history="false">
-			<header class="top"><a class="brand" href="/">diskord<span class="dot">.</span></a><span class="pill">LOCAL ONLY</span><nav><a href="/">概览</a><a href="/messages">消息</a><a href="/settings">设置与证书</a></nav><form action="/logout" method="post"><input type="hidden" name="csrf" value={ v.CSRF }/><button class="quiet" type="submit">退出</button></form></header>
-			<main class="container">
-				if v.Notice != "" {
-					<div class="notice">{ v.Notice }</div>
-				}
-				if v.Error != "" {
-					<div class="notice error">{ v.Error }</div>
-				}
-				switch v.Page {
-					case "overview":
+			<header class="top">
+				<a class="brand" href="/">diskord<span class="dot">.</span></a><span class="pill">LOCAL ONLY</span>
+				<nav>
+					<a href="/">
+						{ v.T("概览") }
+					</a>
+					<a href="/messages">
+						{ v.T("消息") }
+					</a>
+					<a href="/settings">
+						{ v.T("设置与证书") }
+					</a>
+				</nav>
+				<form class="language" action="/language" method="post">
+					<input type="hidden" name="csrf" value={ v.CSRF }/><input type="hidden" name="next" value={ "/" + v.PagePath() }/>
+					<label for="page-lang">
+						{ v.T("语言") }
+					</label><select id="page-lang" name="lang"><option value="zh-CN" selected?={ v.Locale == Chinese }>中文</option><option value="en" selected?={ v.Locale == English }>English</option></select><button class="quiet" type="submit">OK</button>
+				</form>
+				<form action="/logout" method="post">
+					<input type="hidden" name="csrf" value={ v.CSRF }/>
+					<button class="quiet" type="submit">
+						{ v.T("退出") }
+					</button>
+				</form>
+			</header>
+			if v.Page == "messages" {
+				@Archive(v)
+			} else {
+				<main class="container">
+					if v.Notice != "" {
+						<div class="notice">
+							{ v.T(v.Notice) }
+						</div>
+					}
+					if v.Error != "" {
+						<div class="notice error">
+							{ v.T(v.Error) }
+						</div>
+					}
+					if v.Page == "overview" {
 						<div class="eyebrow">OBSERVE, DON'T REPLAY</div>
-						<h1>你的本地消息档案。</h1>
-						<p class="lead">只保存实体与关系。没有原始流量库，不采集客户端认证帧，不主动拉取历史消息。</p>
+						<h1>
+							{ v.T("你的本地消息档案。") }
+						</h1>
+						<p class="lead">
+							{ v.T("只保存实体与关系。没有原始流量库，不采集客户端认证帧，不主动拉取历史消息。") }
+						</p>
 						@Status(v)
-						<section class="panel"><h2>常驻连接</h2><dl><dt>HTTP 代理</dt><dd><code>{ v.Config.Proxy.Listen }</code></dd><dt>控制台</dt><dd><code>{ v.Config.Web.Listen }</code></dd><dt>运行时目录</dt><dd><code>{ v.RuntimeDir }</code></dd><dt>资源文件</dt><dd>{ Label(v.Config.Resources.Enabled) } · 仅被动缓存已经过代理的安全图像类型</dd></dl><p class="muted">关闭网页不会停止代理。应用不自动修改系统代理或根证书信任。非目标域名只进行 CONNECT 隧道转发。</p></section>
-					case "messages":
-						<div class="eyebrow">COLLECTED MESSAGES</div>
-						<h1>消息</h1>
-						<p class="muted">每页 50 条，按消息 ID 倒序。只显示本机实际观察到的数据；未知关系会在后续事件中补全。</p>
-						<form class="search panel" action="/messages" method="get"><label>内容<input type="search" name="q" value={ v.Filter.Query } maxlength="256" placeholder="搜索已收集消息"/></label><label>服务器 ID<input name="guild" value={ v.Filter.GuildID } inputmode="numeric"/></label><label>频道 ID<input name="channel" value={ v.Filter.ChannelID } inputmode="numeric"/></label><button type="submit">筛选</button><a href="/messages">重置</a></form>
-						@MessageList(v)
-					case "settings":
+						<section class="panel">
+							<h2>
+								{ v.T("常驻连接") }
+							</h2>
+							<dl>
+								<dt>
+									{ v.T("HTTP 代理") }
+								</dt>
+								<dd>
+									<code>
+										{ v.Config.Proxy.Listen }
+									</code>
+								</dd>
+								<dt>
+									{ v.T("控制台") }
+								</dt>
+								<dd>
+									<code>
+										{ v.Config.Web.Listen }
+									</code>
+								</dd>
+								<dt>
+									{ v.T("运行时目录") }
+								</dt>
+								<dd>
+									<code>
+										{ v.RuntimeDir }
+									</code>
+								</dd>
+								<dt>
+									{ v.T("资源文件") }
+								</dt>
+								<dd>
+									{ v.T(Label(v.Config.Resources.Enabled)) } · { v.T("仅被动缓存已经过代理的安全图像类型") }
+								</dd>
+							</dl>
+							<p class="muted">
+								{ v.T("关闭网页不会停止代理。应用不自动修改系统代理或根证书信任。非目标域名只进行 CONNECT 隧道转发。") }
+							</p>
+						</section>
+					} else if v.Page == "settings" {
 						<div class="eyebrow">EXPLICIT CONTROLS</div>
-						<h1>设置与证书</h1>
-						<p class="lead">修改采用 YAML 节点级补丁与原子替换。并发更改会被拒绝，不会静默覆盖。</p>
-						<section class="panel"><h2>资源收集</h2><form action="/settings" method="post"><input type="hidden" name="csrf" value={ v.CSRF }/><input type="hidden" name="revision" value={ v.Revision }/><label class="check"><input type="checkbox" name="resources" checked?={ v.Config.Resources.Enabled }/>允许保存 CDN 图像资源</label><p class="muted">关闭时不拦截新的 CDN 连接，也不展示缓存。不会主动下载；旧文件不会自动删除。拒绝 SVG、HTML 与任意第三方域名。</p><button type="submit">保存设置</button></form></section>
-						<section class="panel"><h2>当前 CA</h2><dl><dt>证书</dt><dd><code>{ v.Config.CA.Cert }</code></dd><dt>私钥</dt><dd><code>{ v.Config.CA.Key }</code></dd><dt>SHA-256 指纹</dt><dd class="break"><code>{ v.Fingerprint }</code></dd><dt>有效期至</dt><dd>{ v.Expires }</dd></dl><p class="muted">只在内存中签发站点叶证书。更换 CA 后，请手动调整信任并重新连接客户端。</p>
+						<h1>
+							{ v.T("设置与证书") }
+						</h1>
+						<p class="lead">
+							{ v.T("修改采用 YAML 节点级补丁与原子替换。并发更改会被拒绝，不会静默覆盖。") }
+						</p>
+						<section class="panel">
+							<h2>
+								{ v.T("资源收集") }
+							</h2>
+							<form action="/settings" method="post">
+								<input type="hidden" name="csrf" value={ v.CSRF }/><input type="hidden" name="revision" value={ v.Revision }/>
+								<label class="check">
+									<input type="checkbox" name="resources" checked?={ v.Config.Resources.Enabled }/>{ v.T("允许保存 CDN 图像资源") }
+								</label>
+								<p class="muted">
+									{ v.T("关闭时不拦截新的 CDN 连接，也不展示缓存。不会主动下载；旧文件不会自动删除。拒绝 SVG、HTML 与任意第三方域名。") }
+								</p>
+								<button type="submit">
+									{ v.T("保存设置") }
+								</button>
+							</form>
+						</section>
+						<section class="panel">
+							<h2>
+								{ v.T("当前 CA") }
+							</h2>
+							<dl>
+								<dt>
+									{ v.T("证书") }
+								</dt>
+								<dd>
+									<code>
+										{ v.Config.CA.Cert }
+									</code>
+								</dd>
+								<dt>
+									{ v.T("私钥") }
+								</dt>
+								<dd>
+									<code>
+										{ v.Config.CA.Key }
+									</code>
+								</dd>
+								<dt>
+									{ v.T("SHA-256 指纹") }
+								</dt>
+								<dd class="break">
+									<code>
+										{ v.Fingerprint }
+									</code>
+								</dd>
+								<dt>
+									{ v.T("有效期至") }
+								</dt>
+								<dd>
+									{ v.Expires }
+								</dd>
+							</dl>
+							<p class="muted">
+								{ v.T("只在内存中签发站点叶证书。更换 CA 后，请手动调整信任并重新连接客户端。") }
+							</p>
 							if v.CATrustNotice != "" {
-								<p class="notice error">{ v.CATrustNotice }</p>
+								<p class="notice error">
+									{ v.CATrustNotice }
+								</p>
 							}
 						</section>
 						<section class="panel">
-							<h2>验证并选择已签发 CA</h2>
+							<h2>
+								{ v.T("验证并选择已签发 CA") }
+							</h2>
 							<form action="/ca/select" method="post">
-								<input type="hidden" name="csrf" value={ v.CSRF }/><input type="hidden" name="revision" value={ v.Revision }/><label>证书路径<input name="cert" list="certs" value={ v.Config.CA.Cert } required/></label>
+								<input type="hidden" name="csrf" value={ v.CSRF }/><input type="hidden" name="revision" value={ v.Revision }/>
+								<label>
+									{ v.T("证书路径") }
+									<input name="cert" list="certs" value={ v.Config.CA.Cert } required/>
+								</label>
 								<datalist id="certs">
 									for _, path := range v.CAFiles {
 										<option value={ path }></option>
 									}
-								</datalist><label>私钥路径<input name="key" value={ v.Config.CA.Key } required/></label><button type="submit">校验并选择</button>
+								</datalist>
+								<label>
+									{ v.T("私钥路径") }
+									<input name="key" value={ v.Config.CA.Key } required/>
+								</label>
+								<button type="submit">
+									{ v.T("校验并选择") }
+								</button>
 							</form>
 						</section>
-						<section class="panel"><h2>签发新的根 CA</h2><p class="muted">调用已配置的系统 OpenSSL；没有工具链即报错。必须指定运行目录内的两个不同文件路径，绝不覆盖现有文件，也不会自动安装信任。</p><form action="/ca/issue" method="post"><input type="hidden" name="csrf" value={ v.CSRF }/><label>输出证书路径<input name="cert" placeholder="ca/diskord-root.pem" required/></label><label>输出私钥路径<input name="key" placeholder="ca/diskord-root.key" required/></label><button type="submit">签发 CA</button></form></section>
-				}
-			</main>
-			<footer>diskord v0.1 · 本地授权观察 · HTTP + Gateway → SQLite · 原型，不保证无遗漏</footer>
+						<section class="panel">
+							<h2>
+								{ v.T("签发新的根 CA") }
+							</h2>
+							<p class="muted">
+								{ v.T("调用已配置的系统 OpenSSL；没有工具链即报错。必须指定运行目录内的两个不同文件路径，绝不覆盖现有文件，也不会自动安装信任。") }
+							</p>
+							<form action="/ca/issue" method="post">
+								<input type="hidden" name="csrf" value={ v.CSRF }/>
+								<label>
+									{ v.T("输出证书路径") }
+									<input name="cert" placeholder="ca/diskord-root.pem" required/>
+								</label>
+								<label>
+									{ v.T("输出私钥路径") }
+									<input name="key" placeholder="ca/diskord-root.key" required/>
+								</label>
+								<button type="submit">
+									{ v.T("签发 CA") }
+								</button>
+							</form>
+						</section>
+					}
+				</main>
+			}
+			<footer>
+				diskord v0.1 · { v.T("本地授权观察 · HTTP + Gateway → SQLite · 原型，不保证无遗漏") }
+			</footer>
 		</body>
 	</html>
 }
 
+templ Archive(v View) {
+	<main class="archive">
+		<aside class="guild-rail" aria-label={ v.T("服务器") }>
+			<a class={ v.ActiveClass(v.SelectedGuild == "" && v.Filter.Scope == "") } href="/messages" title={ v.T("所有服务器") }>◎</a><a class={ v.ActiveClass(v.Filter.Scope == "dm") } href="/messages?scope=dm" title={ v.T("私信与未知") }>✉</a>
+			<div class="rail-divider"></div>
+			for _, g := range v.Guilds {
+				<a class={ v.ActiveClass(v.SelectedGuild == g.ID) } href={ "/messages?guild=" + g.ID } title={ v.GuildTitle(g) }>
+					{ v.Initial(g) }
+				</a>
+			}
+		</aside>
+		<aside class="channel-sidebar" aria-label={ v.T("频道") }>
+			<h2>
+				{ v.SidebarTitle() }
+			</h2>
+			<a class={ v.ActiveClass(v.SelectedChannel == "") } href={ v.ScopeURL() }>
+				{ v.T("全部频道") }
+			</a>
+			if v.SelectedGuild != "" || v.Filter.Scope == "dm" {
+				if len(v.Channels) == 0 {
+					<p class="muted">
+						{ v.T("尚未观察到频道") }
+					</p>
+				}
+				for _, c := range v.Channels {
+					if v.Category(c) {
+						<div class="category">
+							{ v.ChannelTitle(c) }
+						</div>
+						for _, child := range v.Channels {
+							if v.ChildOf(child, c.ID) {
+								<a class={ v.ActiveClass(v.SelectedChannel == child.ID) } href={ v.ChannelURL(child.ID) }>
+									<span>#</span> { v.ChannelTitle(child) }
+								</a>
+							}
+						}
+					}
+				}
+				for _, c := range v.Channels {
+					if v.RootChannel(c) {
+						<a class={ v.ActiveClass(v.SelectedChannel == c.ID) } href={ v.ChannelURL(c.ID) }>
+							<span>#</span> { v.ChannelTitle(c) }
+						</a>
+					}
+				}
+			} else if len(v.Guilds) == 0 {
+				<p class="muted">
+					{ v.T("尚未观察到服务器") }
+				</p>
+			} else {
+				<p class="muted">
+					{ v.T("选择服务器或频道浏览本地档案") }
+				</p>
+			}
+		</aside>
+		<section class="archive-content">
+			<header>
+				<h1>
+					{ v.ContentTitle() }
+				</h1>
+				<p>
+					{ v.T("每页 50 条，按消息 ID 倒序。只显示本机实际观察到的数据；未知关系会在后续事件中补全。") }
+				</p>
+			</header>
+			<form class="search panel" action="/messages" method="get">
+				if v.Filter.Scope == "dm" {
+					<input type="hidden" name="scope" value="dm"/>
+				}
+				<label>
+					{ v.T("内容") }
+					<input type="search" name="q" value={ v.Filter.Query } maxlength="256" placeholder={ v.T("搜索已收集消息") }/>
+				</label>
+				<label>
+					{ v.T("服务器 ID") }
+					<input name="guild" value={ v.Filter.GuildID } inputmode="numeric"/>
+				</label>
+				<label>
+					{ v.T("频道 ID") }
+					<input name="channel" value={ v.Filter.ChannelID } inputmode="numeric"/>
+				</label>
+				<button type="submit">
+					{ v.T("筛选") }
+				</button>
+				<a href={ v.ScopeURL() }>
+					{ v.T("重置") }
+				</a>
+			</form>
+			@MessageList(v)
+		</section>
+	</main>
+}
+
 templ Status(v View) {
 	<section id="status" hx-get="/status" hx-trigger="every 5s" hx-swap="outerHTML">
-		<div class="stats"><article><span>用户</span><strong>{ Num(v.Counts.Users) }</strong></article><article><span>服务器</span><strong>{ Num(v.Counts.Guilds) }</strong></article><article><span>频道</span><strong>{ Num(v.Counts.Channels) }</strong></article><article><span>消息</span><strong>{ Num(v.Counts.Messages) }</strong></article></div>
+		<div class="stats">
+			<article>
+				<span>
+					{ v.T("用户") }
+				</span>
+				<strong>
+					{ Num(v.Counts.Users) }
+				</strong>
+			</article>
+			<article>
+				<span>
+					{ v.T("服务器") }
+				</span>
+				<strong>
+					{ Num(v.Counts.Guilds) }
+				</strong>
+			</article>
+			<article>
+				<span>
+					{ v.T("频道") }
+				</span>
+				<strong>
+					{ Num(v.Counts.Channels) }
+				</strong>
+			</article>
+			<article>
+				<span>
+					{ v.T("消息") }
+				</span>
+				<strong>
+					{ Num(v.Counts.Messages) }
+				</strong>
+			</article>
+		</div>
 		<div class="panel">
-			<h2>采集健康状态</h2>
-			<div class="health"><span>WS 连接 <b>{ Num(v.Stats.ActiveGateway) }</b></span><span>HTTP 已解析 <b>{ Num(v.Stats.HTTPBodies) }</b></span><span>Gateway 已解析 <b>{ Num(v.Stats.GatewayEvents) }</b></span><span>提交批次 <b>{ Num(v.Stats.BatchesCommitted) }</b></span><span>缓存资源 <b>{ Num(v.Stats.Assets) }</b></span></div>
-			<div class="health warnings"><span>队列丢弃 { Num(v.Stats.DroppedBatches) }</span><span>HTTP 跳过 { Num(v.Stats.HTTPDropped) }</span><span>WS 采集失步 { Num(v.Stats.GatewayLost) }</span><span>不支持的 WS 编码 { Num(v.Stats.UnsupportedGateway) }</span><span>解析错误 { Num(v.Stats.DecodeErrors) }</span><span>存储错误 { Num(v.Stats.StoreErrors) }</span><span>资源配额跳过 { Num(v.Stats.AssetSkipped) }</span></div>
-			<small>计数自本次启动开始。队列满或解码失败不会阻塞消息转发；非零错误意味着档案可能不完整。无 JavaScript 时可手动刷新。</small>
+			<h2>
+				{ v.T("采集健康状态") }
+			</h2>
+			<div class="health">
+				<span>
+					{ v.T("WS 连接") }
+					<b>
+						{ Num(v.Stats.ActiveGateway) }
+					</b>
+				</span>
+				<span>
+					{ v.T("HTTP 已解析") }
+					<b>
+						{ Num(v.Stats.HTTPBodies) }
+					</b>
+				</span>
+				<span>
+					{ v.T("Gateway 已解析") }
+					<b>
+						{ Num(v.Stats.GatewayEvents) }
+					</b>
+				</span>
+				<span>
+					{ v.T("提交批次") }
+					<b>
+						{ Num(v.Stats.BatchesCommitted) }
+					</b>
+				</span>
+				<span>
+					{ v.T("缓存资源") }
+					<b>
+						{ Num(v.Stats.Assets) }
+					</b>
+				</span>
+			</div>
+			<div class="health warnings">
+				<span>
+					{ v.T("队列丢弃") } { Num(v.Stats.DroppedBatches) }
+				</span>
+				<span>
+					{ v.T("HTTP 跳过") } { Num(v.Stats.HTTPDropped) }
+				</span>
+				<span>
+					{ v.T("WS 采集失步") } { Num(v.Stats.GatewayLost) }
+				</span>
+				<span>
+					{ v.T("不支持的 WS 编码") } { Num(v.Stats.UnsupportedGateway) }
+				</span>
+				<span>
+					{ v.T("解析错误") } { Num(v.Stats.DecodeErrors) }
+				</span>
+				<span>
+					{ v.T("存储错误") } { Num(v.Stats.StoreErrors) }
+				</span>
+				<span>
+					{ v.T("资源配额跳过") } { Num(v.Stats.AssetSkipped) }
+				</span>
+			</div>
+			<small>
+				{ v.T("计数自本次启动开始。队列满或解码失败不会阻塞消息转发；非零错误意味着档案可能不完整。无 JavaScript 时可手动刷新。") }
+			</small>
 		</div>
 	</section>
 }
 
 templ MessageList(v View) {
 	<section id="messages">
-		<div class="list-heading"><span>{ Num(len(v.Rows)) } 条消息</span><a href={ NextURL(v.Filter, v.Filter.Before) } hx-get={ FragmentURL(v.Filter) } hx-target="#messages" hx-swap="outerHTML">刷新</a></div>
+		<div class="list-heading">
+			<span>
+				{ Num(len(v.Rows)) } { v.T("条消息") }
+			</span>
+			<a href={ NextURL(v.Filter, v.Filter.Before) } hx-get={ FragmentURL(v.Filter) } hx-target="#messages" hx-swap="outerHTML">
+				{ v.T("刷新") }
+			</a>
+		</div>
 		if len(v.Rows) == 0 {
-			<div class="empty panel"><h2>还没有匹配的消息</h2><p>确认 CA 已信任、客户端已显式使用代理，然后在 Discord 中打开频道。代理不会补抓未经过本机的历史流量。</p></div>
+			<div class="empty panel">
+				<h2>
+					{ v.T("还没有匹配的消息") }
+				</h2>
+				<p>
+					{ v.T("确认 CA 已信任、客户端已显式使用代理，然后在 Discord 中打开频道。代理不会补抓未经过本机的历史流量。") }
+				</p>
+			</div>
 		}
 		for _, m := range v.Rows {
 			<article class="message panel">
-				<div class="message-meta"><strong>{ m.AuthorName }</strong><span>{ m.GuildName } / { m.ChannelName }</span><span class="tag">{ m.Source }</span></div>
-				<div class="message-body">{ m.Content }</div>
+				<div class="message-meta">
+					<strong>
+						{ v.AuthorName(m) }
+					</strong>
+					<span>
+						{ v.MessageGuildName(m) } / { v.MessageChannelName(m) }
+					</span>
+					<span class="tag">
+						{ m.Source }
+					</span>
+				</div>
+				<div class="message-body">
+					{ m.Content }
+				</div>
 				if m.Deleted {
-					<span class="deleted">已观察到删除事件 · 本地档案保留最后已知内容</span>
+					<span class="deleted">
+						{ v.T("已观察到删除事件 · 本地档案保留最后已知内容") }
+					</span>
 				}
 				for _, a := range m.Attachments {
 					<div class="attachment">
 						if a.Hash != "" && v.Config.Resources.Enabled {
 							<img src={ "/assets/" + a.Hash } alt={ a.Name } loading="lazy"/>
 						}
-						<span>{ a.Name }</span>
+						<span>
+							{ a.Name }
+						</span>
 						if a.Hash == "" {
-							<small>资源未缓存</small>
+							<small>
+								{ v.T("资源未缓存") }
+							</small>
 						}
 					</div>
 				}
 				<div class="message-foot">
-					<time>{ m.Timestamp }</time><code>{ m.ID }</code>
+					<time>
+						{ m.Timestamp }
+					</time>
+					<code>
+						{ m.ID }
+					</code>
 					if m.EditedTimestamp != "" {
-						<span>已编辑 { m.EditedTimestamp }</span>
+						<span>
+							{ v.T("已编辑") } { m.EditedTimestamp }
+						</span>
 					}
 				</div>
 			</article>
 		}
 		if v.Next != "" {
-			<a class="button" href={ v.Next }>查看更早的消息 →</a>
+			<a class="button" href={ v.Next }>
+				{ v.T("查看更早的消息 →") }
+			</a>
 		}
 	</section>
 }

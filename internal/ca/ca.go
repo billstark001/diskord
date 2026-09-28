@@ -122,6 +122,16 @@ func TrustInstructions() string {
 		return "根 CA 尚未获得本机 SSL 信任。核对 SHA-256 指纹后，在系统证书管理器中仅信任公有证书；取消信任时按指纹删除该证书。不要导入私钥；完成后重新启动客户端。"
 	}
 }
+func TrustInstructionsEnglish() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "The root CA is not trusted for SSL on this Mac. Verify the SHA-256 fingerprint, import only the public certificate into your login keychain, and set SSL trust in Keychain Access. To undo, find that certificate by fingerprint and delete it or restore default trust. Never import the private key; then restart the client."
+	case "windows":
+		return "The root CA is not trusted for SSL. Verify the SHA-256 fingerprint, then import only the public certificate under certmgr.msc > Current User > Trusted Root Certification Authorities > Certificates. To undo, find it by fingerprint and delete it there. Never import the private key; then restart the client."
+	default:
+		return "The root CA is not trusted for SSL. Verify the SHA-256 fingerprint and trust only the public certificate in your system certificate manager. To undo, find and remove it by fingerprint. Never import the private key; then restart the client."
+	}
+}
 func (a *Authority) Fingerprint() string {
 	v := sha256.Sum256(a.Root.Raw)
 	return hex.EncodeToString(v[:])
