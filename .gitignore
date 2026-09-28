@@ -3,6 +3,7 @@
 /dist/
 /diskord.yaml
 /runtime/
+/run/
 /ca/
 /db/
 /state/

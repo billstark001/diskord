@@ -30,25 +30,55 @@ func TestLocalConsoleBoundaries(t *testing.T) {
 	u := &UI{Manager: m, session: "session", csrf: "csrf"}
 	handler := u.security(u.auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })))
 	for _, tt := range []struct {
-		host, origin, remote, cookie string
-		status                       int
+		method, host, origin, remote, cookie, fetchMode, fetchDest, fetchSite string
+		status                                                                int
 	}{
-		{"127.0.0.1:3900", "", "127.0.0.1:4567", "session", 204},
-		{"localhost:3900", "http://localhost:3900", "127.0.0.1:4567", "session", 204},
-		{"evil.test:3900", "", "127.0.0.1:4567", "session", 403},
-		{"127.0.0.1:3900", "https://evil.test", "127.0.0.1:4567", "session", 403},
-		{"127.0.0.1:3900", "", "192.0.2.1:4567", "session", 403},
-		{"127.0.0.1:3900", "", "127.0.0.1:4567", "", 303},
+		{"GET", "127.0.0.1:3900", "", "127.0.0.1:4567", "session", "", "", "", 204},
+		{"GET", "localhost:3900", "http://localhost:3900", "127.0.0.1:4567", "session", "", "", "", 204},
+		{"GET", "evil.test:3900", "", "127.0.0.1:4567", "session", "", "", "", 403},
+		{"GET", "127.0.0.1:3900", "https://evil.test", "127.0.0.1:4567", "session", "", "", "", 403},
+		{"GET", "127.0.0.1:3900", "https://evil.test", "127.0.0.1:4567", "session", "navigate", "document", "cross-site", 204},
+		{"POST", "127.0.0.1:3900", "https://evil.test", "127.0.0.1:4567", "session", "navigate", "document", "cross-site", 403},
+		{"POST", "127.0.0.1:3900", "null", "127.0.0.1:4567", "session", "navigate", "document", "same-origin", 204},
+		{"POST", "127.0.0.1:3900", "null", "127.0.0.1:4567", "session", "navigate", "document", "cross-site", 403},
+		{"POST", "127.0.0.1:3900", "null", "127.0.0.1:4567", "session", "navigate", "document", "", 403},
+		{"GET", "127.0.0.1:3900", "", "127.0.0.1:4567", "session", "cors", "empty", "cross-site", 403},
+		{"GET", "127.0.0.1:3900", "", "192.0.2.1:4567", "session", "", "", "", 403},
+		{"GET", "127.0.0.1:3900", "", "127.0.0.1:4567", "", "", "", "", 303},
 	} {
-		r := httptest.NewRequest("GET", "http://"+tt.host+"/", nil)
+		r := httptest.NewRequest(tt.method, "http://"+tt.host+"/", nil)
 		r.Host = tt.host
 		r.RemoteAddr = tt.remote
 		r.Header.Set("Origin", tt.origin)
+		r.Header.Set("Sec-Fetch-Mode", tt.fetchMode)
+		r.Header.Set("Sec-Fetch-Dest", tt.fetchDest)
+		r.Header.Set("Sec-Fetch-Site", tt.fetchSite)
 		r.AddCookie(&http.Cookie{Name: "diskord_session", Value: tt.cookie})
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
 		if w.Code != tt.status {
 			t.Fatalf("%+v => %d", tt, w.Code)
+		}
+	}
+	u.token = "correct"
+	login := u.security(http.HandlerFunc(u.login))
+	for _, tt := range []struct {
+		form   string
+		status int
+	}{
+		{"csrf=csrf&token=wrong", http.StatusUnauthorized},
+		{"csrf=csrf&token=correct", http.StatusSeeOther},
+		{"csrf=wrong&token=correct", http.StatusForbidden},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:3900/login", strings.NewReader(tt.form))
+		r.RemoteAddr = "127.0.0.1:4567"
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Origin", "null")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		w := httptest.NewRecorder()
+		login.ServeHTTP(w, r)
+		if w.Code != tt.status {
+			t.Fatalf("opaque-origin login %q => %d, want %d", tt.form, w.Code, tt.status)
 		}
 	}
 }

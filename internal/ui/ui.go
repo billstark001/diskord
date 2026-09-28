@@ -175,11 +175,19 @@ func (u *UI) security(next http.Handler) http.Handler {
 			http.Error(w, "untrusted Host", http.StatusForbidden)
 			return
 		}
-		if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host {
+		// A link from another site may carry Origin/Fetch Metadata on a
+		// top-level navigation. Opening the console is safe; its forms and
+		// background requests must still come from the console itself.
+		navigation := r.Method == http.MethodGet && r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document"
+		origin := r.Header.Get("Origin")
+		// Some browsers send an opaque Origin for a same-origin form POST.
+		// Fetch Metadata is set by the browser, and the form still needs CSRF.
+		opaqueSameOrigin := origin == "null" && r.Header.Get("Sec-Fetch-Site") == "same-origin"
+		if !navigation && !opaqueSameOrigin && origin != "" && origin != "http://"+r.Host {
 			http.Error(w, "cross-origin request denied", http.StatusForbidden)
 			return
 		}
-		if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		if !navigation && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 			http.Error(w, "cross-site request denied", http.StatusForbidden)
 			return
 		}
