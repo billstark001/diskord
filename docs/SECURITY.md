@@ -2,6 +2,8 @@
 
 This project is intended only for explicitly authorized observation on the local machine. It has no features for covert deployment, automatic CA installation, system proxy hijacking, token export, cookie export, account takeover, process injection, TLS pinning bypass, or active API replay.
 
+When resource caching is enabled, diskord retries missing image paths against allowlisted Discord CDN hosts over HTTPS. It sends no Discord credentials, does not use the system proxy, and rejects redirects. Signed URL query strings are not retained, so some attachments remain unavailable until the client requests them again.
+
 ## Data that is not persisted
 
 The application does not create a raw database or save packet-capture files, WS frame history, HTTP request/response headers, HTTP request bodies, URL query strings, Identify/Resume, or any client WS frames. Only allowlisted entity fields are extracted from server data before it enters the main database. The go-mitmproxy logging/saving/UI addons are not attached, upstream library logging is disabled, and `SSLKEYLOGFILE` / `SSLKEYLOG_FILE` are removed to prevent TLS key logs.
@@ -10,7 +12,7 @@ This does not mean sensitive bytes never appear in memory: MITM forwarding must 
 
 Capture errors appear only as aggregate counters; payloads containing authentication fields are not added to logs. When diagnosing issues, do not casually enable upstream debugging, TLS key logging, HTTP dumps, or sharing of a real runtime directory.
 
-Both optional file loggers are off by default. `logs/diskord.log` receives application diagnostics when enabled; `logs/discord.log` receives the desktop client's own stdout and stderr only when launched through `diskord discord launch`. Treat Discord output as sensitive and do not share it without review. The diskord log has a size limit and three backups; the Discord log is rotated at launch and can grow during a long client session.
+Both optional file loggers are off by default. `logs/diskord-<UTC-start-time>.log` receives application diagnostics when enabled; `logs/discord-<UTC-start-time>.log` receives the desktop client's own stdout and stderr only when launched through `diskord discord launch`. Treat Discord output as sensitive and do not share it without review. Each start gets a separate private file. The diskord log has a 10 MiB size limit and three backups per start; the Discord log can grow during a long client session. Old session logs remain until removed manually.
 
 ## Files and certificates
 

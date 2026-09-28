@@ -17,7 +17,7 @@ Observe only local traffic from your own devices and accounts, or traffic for wh
 | HTTP / WS | HTTP uses go-mitmproxy. Gateway uses a separate, bounded WebSocket forwarding and observation component in the same process. |
 | Entities and relationships | Users, guilds, channels, and messages, with member, DM recipient, and attachment relationships; string IDs, sparse edits, and deletion markers. |
 | Raw traffic | **No raw database is created.** `capture.raw: true` produces an error instead of silently changing privacy behavior. |
-| Resources | Disabled by default. When enabled, only allowlisted CDN images passing through the proxy are cached passively, with per-file and total size limits. |
+| Resources | Disabled by default. When enabled, allowlisted CDN images passing through the proxy are cached. Enabling it also retries previously observed missing CDN paths, with per-file and total size limits. |
 | Platforms | Provides Windows/macOS build and integration instructions. Whether the client accepts proxy arguments and trusts the CA still requires testing. |
 
 This is an archive built from observed traffic, not a full client sync: historical messages the client never requested will not appear. Events with unsupported encodings or over size limits are skipped, and the console displays the relevant counters.
@@ -79,6 +79,8 @@ A dedicated directory is recommended for sensitive data, although the default ru
 ./diskord run
 ```
 
+To run without keeping a terminal open, use `./diskord run-bg` instead of `run`; later run `./diskord stop-bg` from the **same working directory**. `run-bg` requires the configuration file and `runtime_dir` to resolve to that directory. You may select another configuration file in that directory with `--config`, but use the same path for both commands; `stop-bg` can still work if that file has since been removed. `run-bg` records a private control token and PID in `state/diskord-bg.json` and redirects standard output and error to `logs/diskord-bg-<UTC-start-time>.log`. `stop-bg` verifies the background instance through its local authenticated control endpoint and waits for the runtime lock to be released. Ordinary `run` instances are unaffected. Do not share the state file or its token.
+
 On Windows, use the same subcommands with `.\diskord.exe` in place of `./diskord`.
 
 `ui-token` explicitly prints the local console access token. Do not send it to anyone; proxy startup logs do not print that token or Discord credentials. Once running, open this address in a browser:
@@ -93,7 +95,7 @@ Log in with the token. The proxy address is:
 http://127.0.0.1:3901
 ```
 
-The console selects Chinese or English from your browser language on first visit. Use the language control on the login page or in the header to override it. The message page presents observed servers, categories, and channels in a read-only three-column archive. Missing servers or channels are not fetched from Discord; they appear only after the proxy observes them. The narrow layout stacks the channel list above messages. The frontend uses same-origin JSON APIs and an HttpOnly session cookie; it does not store the access token in browser storage.
+The console selects Chinese or English from your browser language on first visit. Use the language control on the login page or in the header to override it. The message page presents observed servers, categories, and channels in a read-only three-column archive. Missing servers or channels are not fetched from Discord; they appear only after the proxy observes them. Cached author avatars and observed reactions appear beside messages. Hover over a reaction to see known user names; a count of other users appears when their identities were not observed. The narrow layout stacks the channel list above messages. The frontend uses same-origin JSON APIs and an HttpOnly session cookie; it does not store the access token in browser storage.
 
 Follow `docs/PLATFORMS.md` to **manually verify and trust the public CA certificate**, then explicitly configure test Chrome / Discord desktop processes to use the proxy. Never import `root.key` into a browser, send it to anyone, or commit it to the repository.
 
@@ -123,7 +125,7 @@ See `diskord.example.yaml` for the default configuration. Initialization does no
 
 The configuration file may be outside the runtime directory, but it must be on the same file system for atomic replacement from `runtime/tmp/`. Cross-file-system updates fail rather than falling back to the system temporary directory.
 
-Both file loggers are disabled by default. `logging.file.enabled` writes diskord application logs to `logs/diskord.log`, with three 10 MiB backups, while retaining stderr output. `logging.discord.enabled` redirects Discord stdout and stderr to `logs/discord.log` when it is started with `diskord discord launch`; an already running Discord process is unaffected. Quit Discord completely before using that command so its proxy arguments take effect. The launcher searches typical installation paths; pass `--path` if necessary. Discord output is rotated when launched, but a single long-running Discord session may grow past 10 MiB. Restart diskord for changes to its file logger to take effect.
+Both file loggers are disabled by default. `logging.file.enabled` writes diskord application logs to `logs/diskord-<UTC-start-time>.log`, with three 10 MiB backups per start, while retaining stderr output. `logging.discord.enabled` redirects Discord stdout and stderr to `logs/discord-<UTC-start-time>.log` when it is started with `diskord discord launch`; an already running Discord process is unaffected. Each start creates a new private log file, and the log contents also include the start timestamp. Quit Discord completely before using that command so its proxy arguments take effect. The launcher searches typical installation paths; pass `--path` if necessary. A single long-running Discord session may grow past 10 MiB. Old session files are retained until you remove them. Restart diskord for changes to its file logger to take effect.
 
 `ca.cert` and `ca.key` accept paths relative to the runtime directory or absolute paths. Paths that escape the directory or contain symbolic links are rejected. The CA is a locally self-signed root certificate, not a public CA certificate requested for an external domain. `ca issue` requires two explicit, distinct paths to files that do not yet exist; issuance does not automatically select or trust the CA.
 
@@ -162,7 +164,7 @@ Here, “does not capture tokens” refers to authentication fields in the proto
 
 Gateway supports JSON and a bounded subset of ETF with continuous `zlib-stream` and `zstd-stream` decompression. It does not change client negotiation, downgrade to plaintext, or force a different encoding. Unknown ETF tags and encodings are forwarded but not parsed, with errors counted. The undisclosed payload structures used by first-party Discord clients may differ from the public API documentation, so each version needs testing.
 
-Raw traffic is not written to disk. Resource caching is off by default; when enabled, it caches only images that already pass through the proxy, without replaying signed URLs or actively fetching missing resources. It records only relationships observable between attachments and actually cached files. URLs for different transcodes or sizes are not guaranteed to be merged.
+Raw traffic is not written to disk. Resource caching is off by default. When enabled, it caches allowed image responses passing through the proxy and directly retries previously observed missing CDN paths without credentials or a system proxy. Signed attachment URL parameters are never stored; those requests may fail after expiry and can be captured when the Discord client supplies a fresh URL. Backfill does not request message history or user data from the Discord API. URLs for different transcodes or sizes are not guaranteed to be merged.
 
 ## Reliability and limitations
 
