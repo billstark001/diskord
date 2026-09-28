@@ -83,7 +83,12 @@ type UI struct {
 	loginCount           int
 }
 
-func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store) (*UI, error) {
+type BackgroundControl struct {
+	Token string
+	Stop  context.CancelFunc
+}
+
+func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store, background ...BackgroundControl) (*UI, error) {
 	if _, err := fs.Stat(frontend, "webdist/index.html"); err != nil {
 		return nil, errors.New("embedded console missing; build with scripts/build.sh or scripts/build.ps1")
 	}
@@ -110,6 +115,30 @@ func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store) (*UI,
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "ok\n")
 	})
+	if len(background) > 0 && background[0].Token != "" && background[0].Stop != nil {
+		control := background[0]
+		verify := func(w http.ResponseWriter, r *http.Request) bool {
+			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Diskord-Bg-Token")), []byte(control.Token)) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return false
+			}
+			return true
+		}
+		mux.HandleFunc("GET /internal/bg-status", func(w http.ResponseWriter, r *http.Request) {
+			if !verify(w, r) {
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = io.WriteString(w, strconv.Itoa(os.Getpid()))
+		})
+		mux.HandleFunc("POST /internal/bg-stop", func(w http.ResponseWriter, r *http.Request) {
+			if !verify(w, r) {
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			go control.Stop()
+		})
+	}
 	for _, route := range []string{"GET /{$}", "GET /messages", "GET /settings"} {
 		mux.HandleFunc(route, u.index)
 	}
@@ -370,6 +399,9 @@ func (u *UI) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if _, err := u.Manager.Patch(body.Revision, map[string]any{"resources.enabled": body.ResourcesEnabled}, nil); err != nil {
 		problem(w, 409, err.Error())
 		return
+	}
+	if body.ResourcesEnabled {
+		u.Engine.StartBackfill()
 	}
 	writeJSON(w, 200, map[string]bool{"saved": true})
 }

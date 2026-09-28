@@ -2,14 +2,13 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"time"
 
 	"diskord/internal/config"
 	"diskord/internal/logfile"
@@ -49,28 +48,31 @@ func discordExecutable(explicit string) (string, error) {
 	return "", errors.New("discord not found in typical installation locations; pass --path")
 }
 
-func launchDiscord(m *config.Manager, args []string) error {
-	fs := flag.NewFlagSet("discord launch", flag.ContinueOnError)
-	path := fs.String("path", "", "Discord executable path; typical locations are searched by default")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 0 {
-		return errors.New("unexpected discord launch arguments")
-	}
-	binary, err := discordExecutable(*path)
+func launchDiscord(m *config.Manager, path string) error {
+	started := time.Now()
+	binary, err := discordExecutable(path)
 	if err != nil {
 		return err
 	}
 	cmd := exec.Command(binary, "--proxy-server=http://"+m.Current().Proxy.Listen, "--disable-quic")
 	cmd.Stdin = nil
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	// A child outlives this launcher. io.Discard makes os/exec create copy pipes,
+	// which close when the launcher exits and cause EPIPE in Electron.
+	output, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+	cmd.Stdout, cmd.Stderr = output, output
 	if m.Current().Logging.Discord.Enabled {
-		writer, err := logfile.Open(m.Root, "discord")
+		writer, err := logfile.OpenAt(m.Root, "discord", started)
 		if err != nil {
 			return fmt.Errorf("open Discord file logger: %w", err)
 		}
 		defer writer.Close()
+		if _, err := fmt.Fprintf(writer, "Discord launch started at %s\n", started.Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
 		cmd.Stdout, cmd.Stderr = writer.File(), writer.File()
 	}
 	if err := cmd.Start(); err != nil {
@@ -80,6 +82,6 @@ func launchDiscord(m *config.Manager, args []string) error {
 	if err := cmd.Process.Release(); err != nil {
 		return err
 	}
-	fmt.Printf("Discord started with the configured proxy (pid %d).\n", pid)
+	fmt.Printf("Discord started at %s with the configured proxy (pid %d).\n", started.Format(time.RFC3339Nano), pid)
 	return nil
 }

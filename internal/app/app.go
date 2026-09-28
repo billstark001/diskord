@@ -23,6 +23,8 @@ import (
 
 func Run(ctx context.Context, path string) error {
 	started := time.Now()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	m, e := config.New(path)
 	if e != nil {
 		return e
@@ -68,7 +70,11 @@ func Run(ctx context.Context, path string) error {
 		defer cancel()
 		_ = backend.Close(ctx)
 	}()
-	control, e := ui.New(m, live, engine, db)
+	var background []ui.BackgroundControl
+	if token := os.Getenv("DISKORD_BG_TOKEN"); len(token) == 64 && os.Getenv("DISKORD_BG_ROOT") == m.Root {
+		background = append(background, ui.BackgroundControl{Token: token, Stop: cancel})
+	}
+	control, e := ui.New(m, live, engine, db, background...)
 	if e != nil {
 		return e
 	}
