@@ -10,7 +10,7 @@ Observe only local traffic from your own devices and accounts, or traffic for wh
 | --- | --- |
 | Single binary | The final Go binary embeds templ-generated pages, CSS, and the actual htmx library. SQLite uses a pure Go driver, and the final build disables CGO. |
 | One YAML file / one runtime directory | Defaults to `diskord.yaml` and `runtime_dir: .`, where `.` is the process working directory. Temporary writes controlled by the application go under `tmp/` in the runtime directory. |
-| Console | Defaults to `127.0.0.1:3900`; provides login, overview, message search, pagination, a resource toggle, and CA issuance and selection. |
+| Console | Defaults to `127.0.0.1:3900`; provides Chinese/English pages, an observed server/category/channel browser, message search and pagination, a resource toggle, and CA issuance and selection. |
 | Persistent proxy | Defaults to `127.0.0.1:3901`; starts with `run`, operates whether or not the web page is open, and stops when the process exits. |
 | CA | Invokes system OpenSSL explicitly; requires certificate and private key paths, reports a missing tool, validates the certificate before selection, and never grants trust automatically. |
 | Configuration updates | Patches YAML nodes, preserves unrelated nodes and comments where possible, checks a revision hash, stages writes inside the runtime directory, and replaces the file atomically. |
@@ -92,6 +92,8 @@ Log in with the token. The proxy address is:
 ```text
 http://127.0.0.1:3901
 ```
+
+The console selects Chinese or English from your browser language on first visit. Use the language control on the login page or in the header to override it. The message page presents observed servers, categories, and channels in a read-only three-column archive. Missing servers or channels are not fetched from Discord; they appear only after the proxy observes them. The narrow layout stacks the channel list above messages.
 
 Follow `docs/PLATFORMS.md` to **manually verify and trust the public CA certificate**, then explicitly configure test Chrome / Discord desktop processes to use the proxy. Never import `root.key` into a browser, send it to anyone, or commit it to the repository.
 

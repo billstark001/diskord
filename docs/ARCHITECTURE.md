@@ -30,6 +30,8 @@ Bounded HTTP queue /           Bounded byte queue / continuous
        templ SSR + local htmx console
 ```
 
+The console selects `zh-CN` or `en` per request from a local preference cookie or `Accept-Language`. A CSRF-protected form changes the preference. The messages page queries a sorted guild list and channels for the selected guild (or the observed DM/unknown scope), groups channels by observed parent category, and filters the local message table. The server renders full pages and htmx fragments from the same locale; no Discord API requests are made by the console.
+
 The non-target CONNECT branch is an undecrypted tunnel and does not enter either capture branch. The HTTP backend's random loopback port does not imply a separate process or deployed service; it remains inside the same binary. The upstream library interface accepts a listen address, not an already-bound listener, so there is a race between choosing a free port and startup. Startup verifies identity through a random health-check path and response; a conflict should fail startup rather than connect to another local service by mistake.
 
 `go-mitmproxy` is pinned to v1.9.3 with a verified HTTP interface. The implementation does not depend on a WS hook from an unpinned main branch. Gateway is implemented separately to structurally guarantee that there is no client-frame capture entry point or full traffic-history list, while providing bounded memory, directional isolation, continuous compression dictionaries, and explicit failure states. It is neither a second process nor a replacement for the required proxy library.
