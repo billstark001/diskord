@@ -1,0 +1,73 @@
+import { style } from "@vanilla-extract/css";
+import { vars } from "./theme.css";
+
+export const common = {
+  toolbar: style({
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    alignItems: "center",
+    marginBottom: 20,
+  }),
+  input: style({
+    background: vars.color.surface,
+    color: vars.color.ink,
+    border: `1px solid ${vars.color.line}`,
+    borderRadius: 8,
+    padding: "10px 12px",
+    minHeight: 39,
+    minWidth: 0,
+    ":focus": { borderColor: vars.color.accent },
+  }),
+  searchInput: style({ flex: "1 1 260px" }),
+  button: style({
+    border: 0,
+    borderRadius: 8,
+    padding: "9px 14px",
+    minHeight: 39,
+    background: vars.color.accentStrong,
+    color: "#fff",
+    fontWeight: 670,
+    ":hover": { filter: "brightness(1.12)" },
+  }),
+  quietButton: style({ background: vars.color.raised, color: vars.color.ink }),
+  card: style({
+    background: vars.color.surface,
+    border: `1px solid ${vars.color.line}`,
+    borderRadius: 12,
+    padding: "20px 22px",
+    marginBottom: 14,
+  }),
+  muted: style({ color: vars.color.muted }),
+  eyebrow: style({
+    color: vars.color.accent,
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+  }),
+  heading: style({ fontSize: 28, fontWeight: 800, letterSpacing: -0.7, margin: "7px 0 15px" }),
+  label: style({
+    display: "block",
+    color: vars.color.muted,
+    fontSize: 12,
+    marginBottom: 8,
+    fontWeight: 650,
+  }),
+  field: style({ marginBottom: 18 }),
+  formRow: style({ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end" }),
+  fullInput: style({ width: "100%" }),
+  notice: style({
+    background: "#304339",
+    border: "1px solid #4b8565",
+    padding: "12px 15px",
+    borderRadius: 8,
+    margin: "14px 0",
+  }),
+  error: style({ background: "#4b3036", border: "1px solid #80505a", color: "#ffd0d0" }),
+  mono: style({
+    fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace",
+    fontSize: 12,
+    overflowWrap: "anywhere",
+  }),
+};

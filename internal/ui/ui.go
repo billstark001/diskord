@@ -4,14 +4,13 @@ import (
 	"context"
 	"crypto/subtle"
 	"embed"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,181 +26,18 @@ import (
 	"diskord/internal/store"
 )
 
-//go:embed static/*
-var assets embed.FS
+//go:embed webdist
+var frontend embed.FS
 
-type View struct {
-	Page, CSRF, Revision, Error, Notice, RuntimeDir, Fingerprint, Expires, Next string
-	CATrustNotice                                                               string
-	Locale                                                                      Locale
-	Config                                                                      config.Config
-	Counts                                                                      model.Counts
-	Stats                                                                       capture.Snapshot
-	Rows                                                                        []model.MessageRow
-	Guilds                                                                      []model.GuildRow
-	Channels                                                                    []model.ChannelRow
-	SelectedGuild, SelectedChannel                                              string
-	Filter                                                                      model.Filter
-	CAFiles                                                                     []string
-}
-
-func (v View) T(zh string) string { return v.Locale.T(zh) }
-func (v View) ChannelName(c model.ChannelRow) string {
-	if c.Name != "" {
-		return c.Name
-	}
-	return v.T("未知频道") + " " + c.ID
-}
-func (v View) GuildName(g model.GuildRow) string {
-	if g.Name != "" {
-		return g.Name
-	}
-	return g.ID
-}
-func (v View) GuildTitle(g model.GuildRow) string {
-	name := v.GuildName(g)
-	if g.Deleted {
-		return name + " · " + v.T("已删除")
-	}
-	if g.Unavailable {
-		return name + " · " + v.T("不可用")
-	}
-	return name
-}
-func (v View) ChannelTitle(c model.ChannelRow) string {
-	name := v.ChannelName(c)
-	if c.Deleted {
-		return name + " · " + v.T("已删除")
-	}
-	return name
-}
-func (v View) MessageChannelName(m model.MessageRow) string {
-	if m.ChannelName != "" {
-		return m.ChannelName
-	}
-	return v.T("未知频道")
-}
-func (v View) MessageGuildName(m model.MessageRow) string {
-	if m.GuildName != "" {
-		return m.GuildName
-	}
-	return v.T("私信 / 未知服务器")
-}
-func (v View) AuthorName(m model.MessageRow) string {
-	if m.AuthorName != "" {
-		return m.AuthorName
-	}
-	return v.T("未知用户")
-}
-func (v View) Category(c model.ChannelRow) bool { return c.Kind == 4 }
-func (v View) ChildOf(c model.ChannelRow, parent string) bool {
-	return c.ParentID == parent && c.Kind != 4
-}
-func (v View) RootChannel(c model.ChannelRow) bool {
-	if c.Kind == 4 || c.ParentID == "" {
-		return c.Kind != 4
-	}
-	for _, other := range v.Channels {
-		if other.ID == c.ParentID && other.Kind == 4 {
-			return false
-		}
-	}
-	return true
-}
-func (v View) Initial(g model.GuildRow) string {
-	for _, r := range v.GuildName(g) {
-		return strings.ToUpper(string(r))
-	}
-	return "?"
-}
-func (v View) ActiveClass(active bool) string {
-	if active {
-		return "active"
-	}
-	return ""
-}
-func (v View) ScopeURL() string {
-	if v.SelectedGuild != "" {
-		return "/messages?guild=" + v.SelectedGuild
-	}
-	if v.Filter.Scope == "dm" {
-		return "/messages?scope=dm"
-	}
-	return "/messages"
-}
-func (v View) ChannelURL(id string) string {
-	if v.SelectedGuild != "" {
-		return "/messages?guild=" + v.SelectedGuild + "&channel=" + id
-	}
-	if v.Filter.Scope == "dm" {
-		return "/messages?scope=dm&channel=" + id
-	}
-	return "/messages?channel=" + id
-}
-func (v View) SidebarTitle() string {
-	if v.Filter.Scope == "dm" {
-		return v.T("私信与未知")
-	}
-	for _, g := range v.Guilds {
-		if g.ID == v.SelectedGuild {
-			return v.GuildName(g)
-		}
-	}
-	return v.T("服务器")
-}
-func (v View) ContentTitle() string {
-	for _, c := range v.Channels {
-		if c.ID == v.SelectedChannel {
-			return "# " + v.ChannelName(c)
-		}
-	}
-	if v.SelectedChannel != "" {
-		return "# " + v.SelectedChannel
-	}
-	if v.SelectedGuild != "" || v.Filter.Scope == "dm" {
-		return v.T("全部频道")
-	}
-	return v.T("消息")
-}
-func (v View) PagePath() string {
-	if v.Page == "overview" {
-		return ""
-	}
-	return v.Page
-}
-
-func Num(v any) string { return fmt.Sprint(v) }
-func NextURL(f model.Filter, before string) string {
-	q := url.Values{}
-	q.Set("q", f.Query)
-	q.Set("guild", f.GuildID)
-	q.Set("channel", f.ChannelID)
-	if f.Scope == "dm" {
-		q.Set("scope", "dm")
-	}
-	if before != "" {
-		q.Set("before", before)
-	}
-	return "/messages?" + q.Encode()
-}
-func FragmentURL(f model.Filter) string {
-	return strings.Replace(NextURL(f, f.Before), "/messages?", "/messages/fragment?", 1)
-}
-func Label(b bool) string {
-	if b {
-		return "开启"
-	}
-	return "关闭"
-}
 func Token(root string) (string, error) {
-	p, e := securefs.Within(root, "state/ui-token")
-	if e != nil {
-		return "", e
+	p, err := securefs.Within(root, "state/ui-token")
+	if err != nil {
+		return "", err
 	}
-	data, e := os.ReadFile(p)
-	if e == nil {
-		if e = securefs.Private(p); e != nil {
-			return "", e
+	data, err := os.ReadFile(p)
+	if err == nil {
+		if err = securefs.Private(p); err != nil {
+			return "", err
 		}
 		value := strings.TrimSpace(string(data))
 		if len(value) != 64 {
@@ -209,27 +45,27 @@ func Token(root string) (string, error) {
 		}
 		return value, nil
 	}
-	if !os.IsNotExist(e) {
-		return "", e
+	if !os.IsNotExist(err) {
+		return "", err
 	}
-	token, e := securefs.Random(32)
-	if e != nil {
-		return "", e
+	token, err := securefs.Random(32)
+	if err != nil {
+		return "", err
 	}
-	f, e := securefs.NewFile(p)
-	if e != nil {
-		return "", e
+	file, err := securefs.NewFile(p)
+	if err != nil {
+		return "", err
 	}
-	if _, e = f.WriteString(token + "\n"); e != nil {
-		f.Close()
-		return "", e
+	if _, err = file.WriteString(token + "\n"); err != nil {
+		file.Close()
+		return "", err
 	}
-	if e = f.Sync(); e != nil {
-		f.Close()
-		return "", e
+	if err = file.Sync(); err != nil {
+		file.Close()
+		return "", err
 	}
-	if e = f.Close(); e != nil {
-		return "", e
+	if err = file.Close(); err != nil {
+		return "", err
 	}
 	return token, nil
 }
@@ -248,8 +84,8 @@ type UI struct {
 }
 
 func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store) (*UI, error) {
-	if _, err := fs.Stat(assets, "static/htmx.min.js"); err != nil {
-		return nil, errors.New("embedded htmx missing; build with scripts/build.sh or scripts/build.ps1")
+	if _, err := fs.Stat(frontend, "webdist/index.html"); err != nil {
+		return nil, errors.New("embedded console missing; build with scripts/build.sh or scripts/build.ps1")
 	}
 	token, err := Token(m.Root)
 	if err != nil {
@@ -265,42 +101,45 @@ func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store) (*UI,
 	}
 	u := &UI{Manager: m, Authority: a, Engine: e, Store: s, token: token, session: session, csrf: csrf}
 	mux := http.NewServeMux()
-	static, err := fs.Sub(assets, "static")
+	web, err := fs.Sub(frontend, "webdist")
 	if err != nil {
 		return nil, err
 	}
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
-	mux.HandleFunc("GET /login", u.loginPage)
-	mux.HandleFunc("POST /login", u.login)
-	mux.HandleFunc("POST /language", u.language)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web))))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		io.WriteString(w, "ok\n")
+		_, _ = io.WriteString(w, "ok\n")
 	})
-	mux.Handle("GET /{$}", u.auth(http.HandlerFunc(u.home)))
-	mux.Handle("GET /status", u.auth(http.HandlerFunc(u.status)))
-	mux.Handle("GET /messages", u.auth(http.HandlerFunc(u.messages)))
-	mux.Handle("GET /messages/fragment", u.auth(http.HandlerFunc(u.messages)))
-	mux.Handle("GET /settings", u.auth(http.HandlerFunc(u.settings)))
-	mux.Handle("POST /settings", u.auth(http.HandlerFunc(u.saveSettings)))
-	mux.Handle("POST /ca/issue", u.auth(http.HandlerFunc(u.issueCA)))
-	mux.Handle("POST /ca/select", u.auth(http.HandlerFunc(u.selectCA)))
-	mux.Handle("POST /logout", u.auth(http.HandlerFunc(u.logout)))
+	for _, route := range []string{"GET /{$}", "GET /messages", "GET /settings"} {
+		mux.HandleFunc(route, u.index)
+	}
+	mux.HandleFunc("GET /api/session", u.sessionInfo)
+	mux.HandleFunc("POST /api/login", u.login)
+	mux.HandleFunc("POST /api/language", u.language)
+	mux.Handle("POST /api/logout", u.auth(http.HandlerFunc(u.logout)))
+	mux.Handle("GET /api/overview", u.auth(http.HandlerFunc(u.overview)))
+	mux.Handle("GET /api/navigation", u.auth(http.HandlerFunc(u.navigation)))
+	mux.Handle("GET /api/messages", u.auth(http.HandlerFunc(u.messages)))
+	mux.Handle("GET /api/settings", u.auth(http.HandlerFunc(u.settings)))
+	mux.Handle("POST /api/settings", u.auth(http.HandlerFunc(u.saveSettings)))
+	mux.Handle("POST /api/ca/issue", u.auth(http.HandlerFunc(u.issueCA)))
+	mux.Handle("POST /api/ca/select", u.auth(http.HandlerFunc(u.selectCA)))
 	mux.Handle("GET /assets/{hash}", u.auth(http.HandlerFunc(u.asset)))
 	ln, err := net.Listen("tcp", m.Current().Web.Listen)
 	if err != nil {
 		return nil, err
 	}
 	u.listener = ln
-	u.server = &http.Server{Handler: u.security(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 75 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024, ErrorLog: log.New(io.Discard, "", 0)}
+	u.server = &http.Server{Handler: u.security(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 75 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024, ErrorLog: log.New(log.Writer(), "http: ", 0)}
 	return u, nil
 }
 func (u *UI) Serve() error                    { return u.server.Serve(u.listener) }
 func (u *UI) Close(ctx context.Context) error { _ = u.listener.Close(); return u.server.Shutdown(ctx) }
+
 func (u *UI) security(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		remote, _, e := net.SplitHostPort(r.RemoteAddr)
-		if e != nil || !net.ParseIP(remote).IsLoopback() {
+		remote, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil || !net.ParseIP(remote).IsLoopback() {
 			http.Error(w, "loopback only", http.StatusForbidden)
 			return
 		}
@@ -309,13 +148,8 @@ func (u *UI) security(next http.Handler) http.Handler {
 			http.Error(w, "untrusted Host", http.StatusForbidden)
 			return
 		}
-		// A link from another site may carry Origin/Fetch Metadata on a
-		// top-level navigation. Opening the console is safe; its forms and
-		// background requests must still come from the console itself.
 		navigation := r.Method == http.MethodGet && r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document"
 		origin := r.Header.Get("Origin")
-		// Some browsers send an opaque Origin for a same-origin form POST.
-		// Fetch Metadata is set by the browser, and the form still needs CSRF.
 		opaqueSameOrigin := origin == "null" && r.Header.Get("Sec-Fetch-Site") == "same-origin"
 		if !navigation && !opaqueSameOrigin && origin != "" && origin != "http://"+r.Host {
 			http.Error(w, "cross-origin request denied", http.StatusForbidden)
@@ -334,40 +168,64 @@ func (u *UI) security(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+func (u *UI) authorized(r *http.Request) bool {
+	cookie, err := r.Cookie("diskord_session")
+	return err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(u.session)) == 1
+}
 func (u *UI) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, e := r.Cookie("diskord_session")
-		if e != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(u.session)) != 1 {
-			if r.Header.Get("HX-Request") == "true" {
-				w.Header().Set("HX-Redirect", "/login")
-				w.WriteHeader(401)
-				return
-			}
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+		if !u.authorized(r) {
+			problem(w, http.StatusUnauthorized, "session expired")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 func (u *UI) csrfOK(w http.ResponseWriter, r *http.Request) bool {
-	if e := r.ParseForm(); e != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
-		return false
-	}
-	if subtle.ConstantTimeCompare([]byte(r.PostForm.Get("csrf")), []byte(u.csrf)) != 1 {
-		http.Error(w, "invalid CSRF token; reload the page", http.StatusForbidden)
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(u.csrf)) != 1 {
+		problem(w, http.StatusForbidden, "invalid CSRF token; reload the page")
 		return false
 	}
 	return true
 }
-func (u *UI) loginPage(w http.ResponseWriter, r *http.Request) {
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+func problem(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+func decodeJSON(r *http.Request, target any) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("exactly one JSON object is required")
+	}
+	return nil
+}
+func (u *UI) index(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	locale := requestLocale(r)
-	w.Header().Set("Content-Language", string(locale))
-	_ = Login(u.csrf, "", locale).Render(r.Context(), w)
+	w.Header().Set("Content-Language", string(requestLocale(r)))
+	content, _ := frontend.ReadFile("webdist/index.html")
+	_, _ = w.Write(content)
+}
+func (u *UI) sessionInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": u.authorized(r), "csrf": u.csrf, "locale": requestLocale(r)})
 }
 func (u *UI) login(w http.ResponseWriter, r *http.Request) {
 	if !u.csrfOK(w, r) {
+		return
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		problem(w, 400, "invalid login request")
 		return
 	}
 	u.loginMu.Lock()
@@ -379,34 +237,29 @@ func (u *UI) login(w http.ResponseWriter, r *http.Request) {
 	limited := u.loginCount > 10
 	u.loginMu.Unlock()
 	if limited {
-		http.Error(w, "too many login attempts; retry later", http.StatusTooManyRequests)
+		problem(w, 429, "too many login attempts; retry later")
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(r.PostForm.Get("token")), []byte(u.token)) != 1 {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Content-Language", string(requestLocale(r)))
-		w.WriteHeader(401)
-		_ = Login(u.csrf, "访问令牌不正确。", requestLocale(r)).Render(r.Context(), w)
+	if subtle.ConstantTimeCompare([]byte(body.Token), []byte(u.token)) != 1 {
+		problem(w, 401, "incorrect access token")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: "diskord_session", Value: u.session, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 12 * 3600})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	writeJSON(w, 200, map[string]bool{"authenticated": true})
 }
 func (u *UI) language(w http.ResponseWriter, r *http.Request) {
 	if !u.csrfOK(w, r) {
 		return
 	}
-	lang := r.PostForm.Get("lang")
-	if lang != string(Chinese) && lang != string(English) {
-		http.Error(w, "invalid language", http.StatusBadRequest)
+	var body struct {
+		Lang string `json:"lang"`
+	}
+	if err := decodeJSON(r, &body); err != nil || body.Lang != string(Chinese) && body.Lang != string(English) {
+		problem(w, 400, "invalid language")
 		return
 	}
-	next := r.PostForm.Get("next")
-	if next != "/login" && next != "/" && next != "/messages" && next != "/settings" {
-		next = "/"
-	}
-	http.SetCookie(w, &http.Cookie{Name: "diskord_lang", Value: lang, Path: "/", SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	http.SetCookie(w, &http.Cookie{Name: "diskord_lang", Value: body.Lang, Path: "/", SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
+	writeJSON(w, 200, map[string]string{"locale": body.Lang})
 }
 func (u *UI) logout(w http.ResponseWriter, r *http.Request) {
 	if !u.csrfOK(w, r) {
@@ -414,173 +267,167 @@ func (u *UI) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: "diskord_session", Path: "/", Value: "", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	w.Header().Set("Clear-Site-Data", `"cache", "cookies", "storage"`)
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	writeJSON(w, 200, map[string]bool{"authenticated": false})
 }
-func (u *UI) view(r *http.Request, page string) View {
-	a := u.Authority.Current()
-	return View{Page: page, Locale: requestLocale(r), CSRF: u.csrf, Revision: u.Manager.Revision(), RuntimeDir: u.Manager.Root, Config: u.Manager.Current(), Stats: u.Engine.Metrics.Snapshot(), Fingerprint: a.Fingerprint(), Expires: a.Root.NotAfter.Format(time.RFC3339)}
-}
-func (u *UI) render(w http.ResponseWriter, r *http.Request, v View) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Language", string(v.Locale))
-	if e := Page(v).Render(r.Context(), w); e != nil {
-		return
-	}
-}
-func (u *UI) home(w http.ResponseWriter, r *http.Request) {
-	v := u.view(r, "overview")
+func (u *UI) overview(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	counts, e := u.Store.Counts(ctx)
-	if e != nil {
-		v.Error = "数据库暂时不可读；请检查状态计数与磁盘空间。"
-	} else {
-		v.Counts = counts
+	counts, err := u.Store.Counts(ctx)
+	if err != nil {
+		problem(w, 503, "database unavailable")
+		return
 	}
-	u.render(w, r, v)
+	c := u.Manager.Current()
+	writeJSON(w, 200, map[string]any{"counts": counts, "stats": u.Engine.Metrics.Snapshot(), "proxy": c.Proxy.Listen, "web": c.Web.Listen, "runtime": u.Manager.Root, "resourcesEnabled": c.Resources.Enabled})
 }
-func (u *UI) status(w http.ResponseWriter, r *http.Request) {
-	v := u.view(r, "overview")
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-	defer cancel()
-	c, e := u.Store.Counts(ctx)
-	if e != nil {
-		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+func (u *UI) navigation(w http.ResponseWriter, r *http.Request) {
+	guildID, scope := r.URL.Query().Get("guild"), r.URL.Query().Get("scope")
+	if guildID != "" && !model.ID(guildID) || scope != "" && scope != "dm" {
+		problem(w, 400, "invalid navigation filter")
 		return
-	}
-	v.Counts = c
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Language", string(v.Locale))
-	_ = Status(v).Render(ctx, w)
-}
-func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
-	v := u.view(r, "messages")
-	q := r.URL.Query()
-	v.Filter = model.Filter{Query: q.Get("q"), GuildID: q.Get("guild"), ChannelID: q.Get("channel"), Before: q.Get("before"), Scope: q.Get("scope"), Limit: 50}
-	if v.Filter.Scope != "" && v.Filter.Scope != "dm" {
-		http.Error(w, "invalid scope", http.StatusBadRequest)
-		return
-	}
-	if v.Filter.GuildID != "" {
-		v.Filter.Scope = ""
-	}
-	if len(v.Filter.Query) > 256 {
-		http.Error(w, "search query too long", http.StatusBadRequest)
-		return
-	}
-	for _, id := range []string{v.Filter.GuildID, v.Filter.ChannelID, v.Filter.Before} {
-		if id != "" && !model.ID(id) {
-			http.Error(w, "invalid entity ID", http.StatusBadRequest)
-			return
-		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	var e error
-	if r.URL.Path != "/messages/fragment" {
-		v.Guilds, e = u.Store.Guilds(ctx)
-		if e != nil {
-			http.Error(w, "navigation temporarily unavailable", http.StatusServiceUnavailable)
+	guilds, err := u.Store.Guilds(ctx)
+	if err != nil {
+		problem(w, 503, "navigation unavailable")
+		return
+	}
+	channels := []model.ChannelRow{}
+	if guildID != "" || scope == "dm" {
+		channels, err = u.Store.Channels(ctx, guildID)
+		if err != nil {
+			problem(w, 503, "navigation unavailable")
 			return
 		}
-		if v.Filter.GuildID != "" || v.Filter.Scope == "dm" {
-			v.Channels, e = u.Store.Channels(ctx, v.Filter.GuildID)
-			if e != nil {
-				http.Error(w, "navigation temporarily unavailable", http.StatusServiceUnavailable)
-				return
-			}
-		}
 	}
-	v.SelectedGuild, v.SelectedChannel = v.Filter.GuildID, v.Filter.ChannelID
-	rows, e := u.Store.Messages(ctx, v.Filter)
-	if e != nil {
-		http.Error(w, "message query temporarily unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	v.Rows = rows
-	if len(rows) == 50 {
-		v.Next = NextURL(v.Filter, rows[len(rows)-1].ID)
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Language", string(v.Locale))
-	if r.URL.Path == "/messages/fragment" {
-		_ = MessageList(v).Render(ctx, w)
-		return
-	}
-	u.render(w, r, v)
+	writeJSON(w, 200, map[string]any{"guilds": guilds, "channels": channels})
 }
-func (u *UI) settings(w http.ResponseWriter, r *http.Request) { u.settingsResult(w, r, "", "") }
-func (u *UI) settingsResult(w http.ResponseWriter, r *http.Request, notice, problem string) {
-	v := u.view(r, "settings")
-	v.Notice = notice
-	v.Error = problem
-	if !u.Authority.Current().TrustedForTLS() {
-		v.CATrustNotice = ca.TrustInstructions()
-		if v.Locale == English {
-			v.CATrustNotice = ca.TrustInstructionsEnglish()
+func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := model.Filter{Query: q.Get("q"), GuildID: q.Get("guild"), ChannelID: q.Get("channel"), Before: q.Get("before"), Scope: q.Get("scope"), Limit: 50}
+	if filter.Scope != "" && filter.Scope != "dm" || len(filter.Query) > 256 {
+		problem(w, 400, "invalid message filter")
+		return
+	}
+	for _, id := range []string{filter.GuildID, filter.ChannelID, filter.Before} {
+		if id != "" && !model.ID(id) {
+			problem(w, 400, "invalid entity ID")
+			return
 		}
 	}
-	if entries, e := os.ReadDir(filepath.Join(u.Manager.Root, "ca")); e == nil {
-		for _, f := range entries {
-			if f.Type().IsRegular() && strings.HasSuffix(f.Name(), ".pem") {
-				v.CAFiles = append(v.CAFiles, "ca/"+f.Name())
+	if filter.GuildID != "" {
+		filter.Scope = ""
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	rows, err := u.Store.Messages(ctx, filter)
+	if err != nil {
+		problem(w, 503, "message query unavailable")
+		return
+	}
+	next := ""
+	if len(rows) == filter.Limit {
+		next = rows[len(rows)-1].ID
+	}
+	writeJSON(w, 200, map[string]any{"rows": rows, "next": next})
+}
+func (u *UI) settings(w http.ResponseWriter, r *http.Request) { u.settingsResult(w, r) }
+func (u *UI) settingsResult(w http.ResponseWriter, r *http.Request) {
+	c := u.Manager.Current()
+	a := u.Authority.Current()
+	trustNotice := ""
+	if !a.TrustedForTLS() {
+		trustNotice = ca.TrustInstructions()
+		if requestLocale(r) == English {
+			trustNotice = ca.TrustInstructionsEnglish()
+		}
+	}
+	files := []string{}
+	if entries, err := os.ReadDir(filepath.Join(u.Manager.Root, "ca")); err == nil {
+		for _, item := range entries {
+			if item.Type().IsRegular() && strings.HasSuffix(item.Name(), ".pem") {
+				files = append(files, "ca/"+item.Name())
 			}
 		}
 	}
-	u.render(w, r, v)
+	writeJSON(w, 200, map[string]any{"revision": u.Manager.Revision(), "resourcesEnabled": c.Resources.Enabled, "cert": c.CA.Cert, "key": c.CA.Key, "fingerprint": a.Fingerprint(), "expires": a.Root.NotAfter.Format(time.RFC3339), "trustNotice": trustNotice, "caFiles": files, "fileLoggerEnabled": c.Logging.File.Enabled, "discordLoggerEnabled": c.Logging.Discord.Enabled})
 }
 func (u *UI) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if !u.csrfOK(w, r) {
 		return
 	}
-	u.changeMu.Lock()
-	defer u.changeMu.Unlock()
-	_, e := u.Manager.Patch(r.PostForm.Get("revision"), map[string]any{"resources.enabled": r.PostForm.Get("resources") == "on"}, nil)
-	if e != nil {
-		u.settingsResult(w, r, "", e.Error())
+	var body struct {
+		Revision         string `json:"revision"`
+		ResourcesEnabled bool   `json:"resourcesEnabled"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		problem(w, 400, "invalid settings request")
 		return
 	}
-	u.settingsResult(w, r, "设置已保存。资源拦截策略对新连接生效；既有 CDN 连接需要重连。", "")
+	u.changeMu.Lock()
+	defer u.changeMu.Unlock()
+	if _, err := u.Manager.Patch(body.Revision, map[string]any{"resources.enabled": body.ResourcesEnabled}, nil); err != nil {
+		problem(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"saved": true})
 }
 func (u *UI) issueCA(w http.ResponseWriter, r *http.Request) {
 	if !u.csrfOK(w, r) {
 		return
 	}
-	u.changeMu.Lock()
-	defer u.changeMu.Unlock()
-	e := ca.Issue(r.Context(), u.Manager.Root, r.PostForm.Get("cert"), r.PostForm.Get("key"), u.Manager.Current().CA.OpenSSL)
-	if e != nil {
-		u.settingsResult(w, r, "", e.Error())
+	var body struct {
+		Cert string `json:"cert"`
+		Key  string `json:"key"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		problem(w, 400, "invalid CA request")
 		return
 	}
-	u.settingsResult(w, r, "CA 已签发但尚未选择。请核验指纹、显式选择，并手动安装公钥证书信任。", "")
+	u.changeMu.Lock()
+	defer u.changeMu.Unlock()
+	if err := ca.Issue(r.Context(), u.Manager.Root, body.Cert, body.Key, u.Manager.Current().CA.OpenSSL); err != nil {
+		problem(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"issued": true})
 }
 func (u *UI) selectCA(w http.ResponseWriter, r *http.Request) {
 	if !u.csrfOK(w, r) {
 		return
 	}
+	var body struct {
+		Revision string `json:"revision"`
+		Cert     string `json:"cert"`
+		Key      string `json:"key"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		problem(w, 400, "invalid CA request")
+		return
+	}
 	u.changeMu.Lock()
 	defer u.changeMu.Unlock()
 	var selected *ca.Authority
-	_, e := u.Manager.Patch(r.PostForm.Get("revision"), map[string]any{"ca.cert": r.PostForm.Get("cert"), "ca.key": r.PostForm.Get("key")}, func(c config.Config) error {
-		var e error
-		selected, e = ca.Load(u.Manager.Root, c.CA.Cert, c.CA.Key)
-		return e
+	_, err := u.Manager.Patch(body.Revision, map[string]any{"ca.cert": body.Cert, "ca.key": body.Key}, func(c config.Config) error {
+		var err error
+		selected, err = ca.Load(u.Manager.Root, c.CA.Cert, c.CA.Key)
+		return err
 	})
-	if e != nil {
-		u.settingsResult(w, r, "", e.Error())
+	if err != nil {
+		problem(w, 409, err.Error())
 		return
 	}
 	u.Authority.Swap(selected)
-	u.settingsResult(w, r, "证书已校验并选择。新 TLS 握手使用新 CA；已有连接不被中断。", "")
+	writeJSON(w, 200, map[string]bool{"selected": true})
 }
 func (u *UI) asset(w http.ResponseWriter, r *http.Request) {
 	if !u.Manager.Current().Resources.Enabled {
 		http.NotFound(w, r)
 		return
 	}
-	path, mime, e := u.Store.Asset(r.Context(), r.PathValue("hash"))
-	if e != nil {
+	path, mime, err := u.Store.Asset(r.Context(), r.PathValue("hash"))
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}

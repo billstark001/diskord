@@ -10,6 +10,9 @@
 /tmp/
 /resources/
 /profiles/
+/frontend/node_modules/
+/frontend/.vite/
+/internal/ui/webdist/
 
 # Sensitive database and key files remain ignored at any depth.
 *.sqlite*

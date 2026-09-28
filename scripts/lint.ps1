@@ -17,8 +17,10 @@ function Invoke-Go {
 $unformatted = & gofmt -l cmd internal tools
 if ($LASTEXITCODE -ne 0) { throw "gofmt failed" }
 if ($unformatted) { throw "Go files need gofmt: $($unformatted -join ', ')" }
-Invoke-Go run github.com/a-h/templ/cmd/templ fmt -fail internal/ui
-Invoke-Go run github.com/a-h/templ/cmd/templ generate -check -path internal/ui
+& node scripts/build-frontend.mjs
+if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+& pnpm -C frontend run check
+if ($LASTEXITCODE -ne 0) { throw "frontend check failed" }
 Invoke-Go mod verify
 Invoke-Go vet ./...
 Invoke-Go run honnef.co/go/tools/cmd/staticcheck ./...

@@ -17,8 +17,8 @@ function Invoke-Go {
     & go @args
     if ($LASTEXITCODE -ne 0) { throw "go command failed with exit code $LASTEXITCODE" }
 }
-Invoke-Go run ./tools/prepare.go
-Invoke-Go run github.com/a-h/templ/cmd/templ generate -path internal/ui
+& node scripts/build-frontend.mjs
+if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 Invoke-Go mod tidy
 Invoke-Go test ./...
 $env:CGO_ENABLED = "0"; $env:GOOS = $TargetOS; $env:GOARCH = $TargetArch
@@ -26,4 +26,4 @@ $suffix = if ($TargetOS -eq "windows") { ".exe" } else { "" }
 $output = "dist/diskord-$TargetOS-$TargetArch$suffix"
 Invoke-Go build -trimpath '-ldflags=-s -w -buildid=' -o $output ./cmd/diskord
 Write-Output "Built: $output"
-Write-Output "The binary embeds the UI and htmx. Node/npm is not required."
+Write-Output "The binary embeds the Preact console; pnpm is needed only when building from source."

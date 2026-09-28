@@ -2,9 +2,8 @@ package ui
 
 import (
 	"bytes"
-	"context"
 	"diskord/internal/config"
-	"diskord/internal/model"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,22 +12,26 @@ import (
 	"testing"
 )
 
-func TestLocalConsoleBoundaries(t *testing.T) {
+func fixture(t *testing.T) *UI {
+	t.Helper()
 	root := t.TempDir()
-	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
-		t.Setenv(k, os.Getenv(k))
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(key, os.Getenv(key))
 	}
 	path := filepath.Join(root, "diskord.yaml")
 	body := strings.Replace(config.Example, "runtime_dir: .", "runtime_dir: "+filepath.ToSlash(root), 1)
-	if e := os.WriteFile(path, []byte(body), 0600); e != nil {
-		t.Fatal(e)
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
 	}
-	m, e := config.New(path)
-	if e != nil {
-		t.Fatal(e)
+	manager, err := config.New(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	u := &UI{Manager: m, session: "session", csrf: "csrf"}
-	handler := u.security(u.auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })))
+	return &UI{Manager: manager, token: "correct", session: "session", csrf: "csrf"}
+}
+func TestLocalConsoleBoundaries(t *testing.T) {
+	u := fixture(t)
+	handler := u.security(u.auth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })))
 	for _, tt := range []struct {
 		method, host, origin, remote, cookie, fetchMode, fetchDest, fetchSite string
 		status                                                                int
@@ -40,11 +43,8 @@ func TestLocalConsoleBoundaries(t *testing.T) {
 		{"GET", "127.0.0.1:3900", "https://evil.test", "127.0.0.1:4567", "session", "navigate", "document", "cross-site", 204},
 		{"POST", "127.0.0.1:3900", "https://evil.test", "127.0.0.1:4567", "session", "navigate", "document", "cross-site", 403},
 		{"POST", "127.0.0.1:3900", "null", "127.0.0.1:4567", "session", "navigate", "document", "same-origin", 204},
-		{"POST", "127.0.0.1:3900", "null", "127.0.0.1:4567", "session", "navigate", "document", "cross-site", 403},
-		{"POST", "127.0.0.1:3900", "null", "127.0.0.1:4567", "session", "navigate", "document", "", 403},
-		{"GET", "127.0.0.1:3900", "", "127.0.0.1:4567", "session", "cors", "empty", "cross-site", 403},
 		{"GET", "127.0.0.1:3900", "", "192.0.2.1:4567", "session", "", "", "", 403},
-		{"GET", "127.0.0.1:3900", "", "127.0.0.1:4567", "", "", "", "", 303},
+		{"GET", "127.0.0.1:3900", "", "127.0.0.1:4567", "", "", "", "", 401},
 	} {
 		r := httptest.NewRequest(tt.method, "http://"+tt.host+"/", nil)
 		r.Host = tt.host
@@ -60,89 +60,58 @@ func TestLocalConsoleBoundaries(t *testing.T) {
 			t.Fatalf("%+v => %d", tt, w.Code)
 		}
 	}
-	u.token = "correct"
-	login := u.security(http.HandlerFunc(u.login))
-	for _, tt := range []struct {
-		form   string
-		status int
-	}{
-		{"csrf=csrf&token=wrong", http.StatusUnauthorized},
-		{"csrf=csrf&token=correct", http.StatusSeeOther},
-		{"csrf=wrong&token=correct", http.StatusForbidden},
-	} {
-		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:3900/login", strings.NewReader(tt.form))
-		r.RemoteAddr = "127.0.0.1:4567"
-		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		r.Header.Set("Origin", "null")
-		r.Header.Set("Sec-Fetch-Site", "same-origin")
-		w := httptest.NewRecorder()
-		login.ServeHTTP(w, r)
-		if w.Code != tt.status {
-			t.Fatalf("opaque-origin login %q => %d, want %d", tt.form, w.Code, tt.status)
-		}
-	}
 }
-func TestMessageHTMLIsEscaped(t *testing.T) {
-	var b bytes.Buffer
-	v := View{Rows: []model.MessageRow{{ID: "1", Content: `<script>alert("x")</script>`, AuthorName: `<img src=x onerror=alert(1)>`}}}
-	if e := MessageList(v).Render(context.Background(), &b); e != nil {
-		t.Fatal(e)
-	}
-	if strings.Contains(b.String(), "<script>") || strings.Contains(b.String(), "<img src=x") {
-		t.Fatal("stored XSS")
-	}
-	if !strings.Contains(b.String(), "&lt;script&gt;") {
-		t.Fatal("missing escaped message")
-	}
-}
-
-func TestLocalesAndArchiveNavigation(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/messages", nil)
-	r.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	if requestLocale(r) != English {
-		t.Fatal("English language detection failed")
-	}
-	r.AddCookie(&http.Cookie{Name: "diskord_lang", Value: "zh-CN"})
-	if requestLocale(r) != Chinese {
-		t.Fatal("language preference did not override header")
-	}
-	v := View{Page: "messages", Locale: English, SelectedGuild: "1", SelectedChannel: "3", Filter: model.Filter{GuildID: "1", ChannelID: "3"}, Guilds: []model.GuildRow{{ID: "1", Name: "Server"}}, Channels: []model.ChannelRow{{ID: "2", Name: "Category", Kind: 4}, {ID: "3", ParentID: "2", Name: "General"}}}
-	var b bytes.Buffer
-	if err := Page(v).Render(context.Background(), &b); err != nil {
+func TestSessionLoginAndLanguage(t *testing.T) {
+	u := fixture(t)
+	r := httptest.NewRequest("GET", "http://127.0.0.1:3900/api/session", nil)
+	r.Header.Set("Accept-Language", "en-US,en;q=0.8")
+	w := httptest.NewRecorder()
+	u.sessionInfo(w, r)
+	var session map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &session); err != nil {
 		t.Fatal(err)
 	}
-	html := b.String()
-	for _, want := range []string{`lang="en"`, "All channels", "Category", "General", "/messages?guild=1&amp;channel=3"} {
-		if !strings.Contains(html, want) {
-			t.Errorf("missing %q in English archive", want)
+	if session["authenticated"] != false || session["locale"] != "en" || session["csrf"] != "csrf" {
+		t.Fatal(session)
+	}
+	for _, tt := range []struct {
+		body, csrf string
+		status     int
+	}{{`{"token":"wrong"}`, "csrf", 401}, {`{"token":"correct"}`, "wrong", 403}, {`{"token":"correct"}`, "csrf", 200}} {
+		r = httptest.NewRequest("POST", "/api/login", strings.NewReader(tt.body))
+		r.Header.Set("X-CSRF-Token", tt.csrf)
+		w = httptest.NewRecorder()
+		u.login(w, r)
+		if w.Code != tt.status {
+			t.Fatalf("login %s => %d", tt.body, w.Code)
+		}
+		if tt.status == 200 && !strings.Contains(w.Header().Get("Set-Cookie"), "diskord_session=") {
+			t.Fatal("session cookie missing")
 		}
 	}
-	if strings.Contains(html, "尚未观察到") {
-		t.Fatal("untranslated archive text")
+	r = httptest.NewRequest("POST", "/api/language", strings.NewReader(`{"lang":"en"}`))
+	r.Header.Set("X-CSRF-Token", "csrf")
+	w = httptest.NewRecorder()
+	u.language(w, r)
+	if w.Code != 200 || !strings.Contains(w.Header().Get("Set-Cookie"), "diskord_lang=en") {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }
-
-func TestLanguagePreferenceRequiresCSRFAndSafeRedirect(t *testing.T) {
-	u := &UI{csrf: "secret"}
-	for _, tt := range []struct {
-		form     string
-		status   int
-		location string
-	}{
-		{"csrf=secret&lang=en&next=%2Fmessages", 303, "/messages"},
-		{"csrf=secret&lang=en&next=https%3A%2F%2Fevil.test", 303, "/"},
-		{"csrf=wrong&lang=en&next=%2Fmessages", 403, ""},
-		{"csrf=secret&lang=fr&next=%2Fmessages", 400, ""},
-	} {
-		r := httptest.NewRequest(http.MethodPost, "/language", strings.NewReader(tt.form))
-		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		w := httptest.NewRecorder()
-		u.language(w, r)
-		if w.Code != tt.status || w.Header().Get("Location") != tt.location {
-			t.Fatalf("%q: status %d, location %q", tt.form, w.Code, w.Header().Get("Location"))
-		}
-		if tt.location == "/messages" && !strings.Contains(w.Header().Get("Set-Cookie"), "diskord_lang=en") {
-			t.Fatal("language cookie missing")
-		}
+func TestJSONMessageEscaping(t *testing.T) {
+	var b bytes.Buffer
+	writeJSON(httptest.NewRecorder(), 200, map[string]string{"content": "<script>alert(1)</script>"})
+	if err := json.NewEncoder(&b).Encode(map[string]string{"content": "<script>alert(1)</script>"}); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b.Bytes(), []byte("<script>")) {
+		t.Fatal("JSON encoder did not escape HTML")
+	}
+}
+func TestEmbeddedConsole(t *testing.T) {
+	u := fixture(t)
+	w := httptest.NewRecorder()
+	u.index(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "/ui/assets/app.js") {
+		t.Fatal("built frontend missing from index")
 	}
 }

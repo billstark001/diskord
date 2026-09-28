@@ -3,13 +3,11 @@
 all: build
 
 fmt:
-	go run github.com/a-h/templ/cmd/templ fmt internal/ui
-	gofmt -w cmd internal tools
-	go run github.com/a-h/templ/cmd/templ generate -path internal/ui
+	gofmt -w cmd internal
+	pnpm -C frontend run format
 
 generate:
-	go run ./tools/prepare.go
-	go run github.com/a-h/templ/cmd/templ generate -path internal/ui
+	node scripts/build-frontend.mjs --force
 
 lint:
 	./scripts/lint.sh
