@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"diskord/internal/model"
@@ -28,6 +29,7 @@ type Store struct {
 	writer, reader *sql.DB
 	Root           string
 	assetBytes     int64
+	assetMu        sync.Mutex
 }
 
 func Open(root string) (*Store, error) {
@@ -73,7 +75,7 @@ func Open(root string) (*Store, error) {
 	if e = w.QueryRow("SELECT version FROM schema_version").Scan(&version); e != nil {
 		return fail(e)
 	}
-	if version != 1 {
+	if version != 2 {
 		return fail(errors.New("unsupported database schema version"))
 	}
 	r, e := sql.Open("sqlite", u.String())
@@ -273,17 +275,20 @@ func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 			if _, e = tx.Exec("UPDATE messages SET "+strings.Join(assign, ",")+" WHERE id=?", args...); e != nil {
 				return e
 			}
-			if m.HasAttachments {
-				if _, e = tx.Exec("DELETE FROM attachments WHERE message_id=?", m.ID); e != nil {
+		}
+		if m.HasAttachments && (m.Revision >= revision || m.Revision == 0) {
+			if _, e = tx.Exec("DELETE FROM attachments WHERE message_id=?", m.ID); e != nil {
+				return e
+			}
+			for _, a := range m.Attachments {
+				if _, e = tx.Exec("INSERT INTO attachments(id,message_id,name,host,path,size) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,host=excluded.host,path=excluded.path,size=excluded.size", a.ID, m.ID, a.Name, a.Host, a.Path, a.Size); e != nil {
 					return e
-				}
-				for _, a := range m.Attachments {
-					if _, e = tx.Exec("INSERT INTO attachments(id,message_id,name,host,path,size) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,host=excluded.host,path=excluded.path,size=excluded.size", a.ID, m.ID, a.Name, a.Host, a.Path, a.Size); e != nil {
-						return e
-					}
 				}
 			}
 		}
+	}
+	if e = applyReactions(tx, b); e != nil {
+		return e
 	}
 	return tx.Commit()
 }
@@ -359,7 +364,7 @@ func (s *Store) Messages(ctx context.Context, f model.Filter) ([]model.MessageRo
 		args = append(args, model.SortKey(f.Before))
 	}
 	args = append(args, f.Limit)
-	query := `SELECT m.id,COALESCE(m.channel_id,''),COALESCE(c.name,c.id,''),COALESCE(g.name,c.guild_id,''),COALESCE(u.display_name,u.username,u.id,''),COALESCE(m.content,''),COALESCE(m.created_at,''),COALESCE(m.edited_at,''),m.source,m.deleted FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN guilds g ON g.id=c.guild_id LEFT JOIN users u ON u.id=m.author_id WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.sort_key DESC LIMIT ?`
+	query := `SELECT m.id,COALESCE(m.channel_id,''),COALESCE(c.name,c.id,''),COALESCE(g.name,c.guild_id,''),COALESCE(u.display_name,u.username,u.id,''),COALESCE(m.content,''),COALESCE(m.created_at,''),COALESCE(m.edited_at,''),m.source,m.deleted,COALESCE((SELECT ru.hash FROM resource_urls ru WHERE ru.host='cdn.discordapp.com' AND substr(ru.path,1,length('/avatars/'||u.id||'/'||u.avatar||'.'))='/avatars/'||u.id||'/'||u.avatar||'.' LIMIT 1),'') FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN guilds g ON g.id=c.guild_id LEFT JOIN users u ON u.id=m.author_id WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.sort_key DESC LIMIT ?`
 	rows, e := s.reader.QueryContext(ctx, query, args...)
 	if e != nil {
 		return nil, e
@@ -367,7 +372,7 @@ func (s *Store) Messages(ctx context.Context, f model.Filter) ([]model.MessageRo
 	result := []model.MessageRow{}
 	for rows.Next() {
 		var m model.MessageRow
-		if e = rows.Scan(&m.ID, &m.ChannelID, &m.ChannelName, &m.GuildName, &m.AuthorName, &m.Content, &m.Timestamp, &m.EditedTimestamp, &m.Source, &m.Deleted); e != nil {
+		if e = rows.Scan(&m.ID, &m.ChannelID, &m.ChannelName, &m.GuildName, &m.AuthorName, &m.Content, &m.Timestamp, &m.EditedTimestamp, &m.Source, &m.Deleted, &m.AvatarHash); e != nil {
 			rows.Close()
 			return nil, e
 		}
@@ -396,6 +401,10 @@ func (s *Store) Messages(ctx context.Context, f model.Filter) ([]model.MessageRo
 		if e != nil {
 			return nil, e
 		}
+		result[i].Reactions, e = s.messageReactions(ctx, result[i].ID)
+		if e != nil {
+			return nil, e
+		}
 	}
 	return result, nil
 }
@@ -403,6 +412,8 @@ func (s *Store) Messages(ctx context.Context, f model.Filter) ([]model.MessageRo
 var ErrQuota = errors.New("resource cache quota reached")
 
 func (s *Store) SaveAsset(ctx context.Context, host, path, mime string, data []byte, quota int64) error {
+	s.assetMu.Lock()
+	defer s.assetMu.Unlock()
 	ext := scope.ImageExtension(mime)
 	if !scope.CDN(host) || ext == "" {
 		return errors.New("resource outside image allowlist")

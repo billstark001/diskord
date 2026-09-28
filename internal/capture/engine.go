@@ -54,6 +54,9 @@ type Engine struct {
 	httpWG, writeWG         sync.WaitGroup
 	writeCtx                context.Context
 	writeCancel             context.CancelFunc
+	backfillMu              sync.Mutex
+	backfillRunning         bool
+	backfillWG              sync.WaitGroup
 }
 
 func New(s *store.Store, current func() config.Config) *Engine {
@@ -115,6 +118,7 @@ func (e *Engine) Close() {
 	e.writeWG.Wait()
 	timer.Stop()
 	e.writeCancel()
+	e.backfillWG.Wait()
 }
 func Decode(data []byte, encoding string, max int) ([]byte, error) {
 	var r io.Reader = bytes.NewReader(data)

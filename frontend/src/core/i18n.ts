@@ -38,6 +38,7 @@ export const strings = {
   unknownGuild: ["私信 / 未知服务器", "DM / unknown server"],
   edited: ["已编辑", "Edited"],
   assetMissing: ["资源未缓存", "Asset not cached"],
+  unknownReactors: ["其他用户", "other users"],
   archiveHint: [
     "只读本地档案；不会主动从 Discord 拉取历史。",
     "Read-only local archive; history is never fetched from Discord.",

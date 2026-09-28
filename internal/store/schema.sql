@@ -43,3 +43,17 @@ CREATE TABLE IF NOT EXISTS resource_urls(
  host TEXT NOT NULL, path TEXT NOT NULL, hash TEXT NOT NULL REFERENCES assets(hash),
  PRIMARY KEY(host,path)
 );
+CREATE TABLE IF NOT EXISTS reaction_totals(
+ message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+ emoji_key TEXT NOT NULL, emoji_id TEXT NOT NULL, emoji_name TEXT NOT NULL,
+ animated INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 0,
+ snapshot_marker INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(message_id,emoji_key)
+);
+CREATE TABLE IF NOT EXISTS reaction_users(
+ message_id TEXT NOT NULL, emoji_key TEXT NOT NULL,
+ user_id TEXT NOT NULL REFERENCES users(id),
+ PRIMARY KEY(message_id,emoji_key,user_id),
+ FOREIGN KEY(message_id,emoji_key) REFERENCES reaction_totals(message_id,emoji_key) ON DELETE CASCADE
+);
+UPDATE schema_version SET version=2 WHERE version=1;

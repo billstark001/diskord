@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { useInfiniteQuery } from "@tanstack/preact-query";
 import { api, params } from "../core/api";
-import type { Messages } from "../core/api";
+import type { Message, Messages } from "../core/api";
 import { text } from "../core/i18n";
 import { MessageItem } from "../components/MessageItem";
 import { s } from "../styles";
@@ -25,6 +25,7 @@ export function ArchivePage({
   useEffect(() => setDraft(submitted), [submitted]);
   const pages = useInfiniteQuery({
     queryKey: ["messages", guildID, channelID, selectedScope, submitted],
+    refetchInterval: 10000,
     initialPageParam: "",
     queryFn: ({ pageParam }) =>
       api<Messages>(
@@ -32,7 +33,11 @@ export function ArchivePage({
       ),
     getNextPageParam: (last) => last.next || undefined,
   });
-  const rows = pages.data?.pages.flatMap((part) => part.rows) || [];
+  const rowsByID = new Map<string, Message>();
+  for (const row of pages.data?.pages.flatMap((part) => part.rows) || []) {
+    if (!rowsByID.has(row.ID)) rowsByID.set(row.ID, row);
+  }
+  const rows = [...rowsByID.values()];
   return (
     <div class={s.narrowContent}>
       <form

@@ -37,18 +37,31 @@ type Message struct {
 	Attachments                                              []Attachment
 	// HasAttachments distinguishes omission (partial update) from an empty list.
 	HasAttachments bool
+	Reactions      []Reaction
+	HasReactions   bool
+}
+type Reaction struct {
+	EmojiID, EmojiName string
+	Animated           bool
+	Count              int
+}
+type ReactionChange struct {
+	MessageID, EmojiID, EmojiName, UserID string
+	Animated                              bool
+	Operation                             string // add, remove, observe, clear, clear-emoji
 }
 type Batch struct {
-	Source   string
-	Users    []User
-	Guilds   []Guild
-	Channels []Channel
-	Members  []Member
-	Messages []Message
+	Source          string
+	Users           []User
+	Guilds          []Guild
+	Channels        []Channel
+	Members         []Member
+	Messages        []Message
+	ReactionChanges []ReactionChange
 }
 
 func (b Batch) Empty() bool {
-	return len(b.Users)+len(b.Guilds)+len(b.Channels)+len(b.Members)+len(b.Messages) == 0
+	return len(b.Users)+len(b.Guilds)+len(b.Channels)+len(b.Members)+len(b.Messages)+len(b.ReactionChanges) == 0
 }
 func ID(s string) bool {
 	if len(s) == 0 || len(s) > 20 {
@@ -82,8 +95,17 @@ func Revision(edited, created *string, fallback int64) int64 {
 type MessageRow struct {
 	ID, ChannelID, ChannelName, GuildName, AuthorName, Content string
 	Timestamp, EditedTimestamp, Source                         string
+	AvatarHash                                                 string
 	Deleted                                                    bool
 	Attachments                                                []AssetRow
+	Reactions                                                  []ReactionRow
+}
+type ReactionRow struct {
+	EmojiID, EmojiName  string
+	EmojiHash           string
+	Animated            bool
+	Count, UnknownCount int
+	Users               []string
 }
 type GuildRow struct {
 	ID, Name             string

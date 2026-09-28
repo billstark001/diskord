@@ -6,11 +6,13 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"diskord/internal/model"
 )
 
 var resumeGateway = regexp.MustCompile(`^gateway(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?\.discord\.gg$`)
 var apiPrefix = regexp.MustCompile(`^/api/(?:v[0-9]+/)?`)
-var entityPath = regexp.MustCompile(`^(?:users/(?:@me|[0-9]+)(?:/(?:guilds|channels))?|guilds/[0-9]+(?:/(?:channels|messages/search))?|channels/[0-9]+(?:/messages(?:/(?:[0-9]+|search))?)?)$`)
+var entityPath = regexp.MustCompile(`^(?:users/(?:@me|[0-9]+)(?:/(?:guilds|channels))?|guilds/[0-9]+(?:/(?:channels|messages/search))?|channels/[0-9]+(?:/messages(?:/(?:[0-9]+(?:/reactions/[^/]+)?|search))?)?)$`)
 
 func Host(s string) string {
 	if h, _, e := net.SplitHostPort(s); e == nil {
@@ -51,6 +53,23 @@ func AssetURL(raw string) (host, path string, ok bool) {
 	}
 	// Never retain signed URL query strings, fragments, credentials, or arbitrary hosts.
 	return Host(u.Host), u.EscapedPath(), true
+}
+func AvatarPath(id, hash string) string {
+	if !model.ID(id) || len(hash) == 0 || len(hash) > 128 {
+		return ""
+	}
+	for _, r := range hash {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+		default:
+			return ""
+		}
+	}
+	ext := ".png"
+	if strings.HasPrefix(hash, "a_") {
+		ext = ".gif"
+	}
+	return "/avatars/" + id + "/" + hash + ext
 }
 func ImageExtension(mime string) string {
 	switch strings.ToLower(strings.TrimSpace(strings.SplitN(mime, ";", 2)[0])) {

@@ -5,6 +5,7 @@ package protocol
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -192,7 +193,26 @@ func (p *parser) message(o object, channel string, deleted bool) {
 		_ = json.Unmarshal(a["size"], &size)
 		m.Attachments = append(m.Attachments, model.Attachment{ID: aid, MessageID: id, Name: str(a["filename"]), Host: h, Path: path, Size: size})
 	}
-	m.Revision = model.Revision(m.EditedTimestamp, m.Timestamp, p.now)
+	_, m.HasReactions = o["reactions"]
+	for _, raw := range arr(o["reactions"]) {
+		reaction := obj(raw)
+		emoji := obj(reaction["emoji"])
+		id, name := str(emoji["id"]), str(emoji["name"])
+		if id != "" && !model.ID(id) || id == "" && (name == "" || len(name) > 128) {
+			continue
+		}
+		var count int
+		if json.Unmarshal(reaction["count"], &count) != nil || count < 0 || count > 1000000 {
+			continue
+		}
+		animated := bp(emoji, "animated")
+		m.Reactions = append(m.Reactions, model.Reaction{EmojiID: id, EmojiName: name, Animated: animated != nil && *animated, Count: count})
+	}
+	// Deletions and metadata-only updates must not advance the content revision:
+	// a later observed message snapshot may be the first source of its body.
+	if !deleted && (m.Content != nil || m.Timestamp != nil || m.EditedTimestamp != nil) {
+		m.Revision = model.Revision(m.EditedTimestamp, m.Timestamp, p.now)
+	}
 	p.b.Messages = append(p.b.Messages, m)
 }
 
@@ -246,6 +266,40 @@ func Gateway(data []byte) (model.Batch, error) {
 		for _, id := range arr(o["ids"]) {
 			p.message(object{"id": id, "channel_id": o["channel_id"], "guild_id": o["guild_id"]}, "", true)
 		}
+	case "MESSAGE_REACTION_ADD", "MESSAGE_REACTION_REMOVE", "MESSAGE_REACTION_REMOVE_ALL", "MESSAGE_REACTION_REMOVE_EMOJI":
+		messageID := str(o["message_id"])
+		if !model.ID(messageID) {
+			break
+		}
+		change := model.ReactionChange{MessageID: messageID}
+		switch envelope.T {
+		case "MESSAGE_REACTION_ADD":
+			change.Operation = "add"
+		case "MESSAGE_REACTION_REMOVE":
+			change.Operation = "remove"
+		case "MESSAGE_REACTION_REMOVE_ALL":
+			change.Operation = "clear"
+		case "MESSAGE_REACTION_REMOVE_EMOJI":
+			change.Operation = "clear-emoji"
+		}
+		if change.Operation != "clear" {
+			emoji := obj(o["emoji"])
+			change.EmojiID, change.EmojiName = str(emoji["id"]), str(emoji["name"])
+			if change.EmojiID != "" && !model.ID(change.EmojiID) || change.EmojiID == "" && (change.EmojiName == "" || len(change.EmojiName) > 128) {
+				break
+			}
+			animated := bp(emoji, "animated")
+			change.Animated = animated != nil && *animated
+		}
+		if change.Operation == "add" || change.Operation == "remove" {
+			change.UserID = str(o["user_id"])
+			if !model.ID(change.UserID) {
+				break
+			}
+			p.user(obj(obj(o["member"])["user"]))
+			p.user(obj(o["user"]))
+		}
+		p.b.ReactionChanges = append(p.b.ReactionChanges, change)
 	case "GUILD_MEMBER_ADD", "GUILD_MEMBER_UPDATE":
 		p.member(o, str(o["guild_id"]))
 	case "GUILD_MEMBERS_CHUNK":
@@ -278,6 +332,24 @@ func HTTP(path string, data []byte) (model.Batch, error) {
 		}
 	}
 	switch {
+	case parts[0] == "channels" && len(parts) == 6 && parts[2] == "messages" && parts[4] == "reactions":
+		name, err := url.PathUnescape(parts[5])
+		if err != nil || len(name) > 128 || !model.ID(parts[3]) {
+			break
+		}
+		id := ""
+		if colon := strings.LastIndexByte(name, ':'); colon >= 0 && model.ID(name[colon+1:]) {
+			id, name = name[colon+1:], name[:colon]
+		}
+		if name == "" && id == "" {
+			break
+		}
+		for _, raw := range arr(data) {
+			userID := p.user(obj(raw))
+			if userID != "" {
+				p.b.ReactionChanges = append(p.b.ReactionChanges, model.ReactionChange{MessageID: parts[3], EmojiID: id, EmojiName: name, UserID: userID, Operation: "observe"})
+			}
+		}
 	case strings.HasSuffix(endpoint, "/messages/search"):
 		// Search returns an array of arrays, not a flat message list.
 		for _, group := range arr(obj(data)["messages"]) {

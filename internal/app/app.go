@@ -55,6 +55,7 @@ func Run(ctx context.Context, path string) error {
 	}
 	defer db.Close()
 	engine := capture.New(db, m.Current)
+	engine.StartBackfill()
 	defer engine.Close()
 	backend, e := mitm.Start(live, engine)
 	if e != nil {

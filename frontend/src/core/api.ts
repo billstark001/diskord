@@ -15,12 +15,22 @@ export type Message = {
   ChannelName: string;
   GuildName: string;
   AuthorName: string;
+  AvatarHash: string;
   Content: string;
   Timestamp: string;
   EditedTimestamp: string;
   Source: string;
   Deleted: boolean;
   Attachments: { Name: string; Hash: string }[];
+  Reactions: {
+    EmojiID: string;
+    EmojiName: string;
+    EmojiHash: string;
+    Animated: boolean;
+    Count: number;
+    UnknownCount: number;
+    Users: string[];
+  }[];
 };
 export type Navigation = { guilds: Guild[]; channels: Channel[] };
 export type Messages = { rows: Message[]; next: string };

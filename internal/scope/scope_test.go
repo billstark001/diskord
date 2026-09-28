@@ -13,7 +13,7 @@ func TestScope(t *testing.T) {
 			t.Fatal(h)
 		}
 	}
-	for _, p := range []string{"/api/v10/channels/123/messages", "/api/v9/users/@me", "/api/v9/guilds/123/messages/search"} {
+	for _, p := range []string{"/api/v10/channels/123/messages", "/api/v9/users/@me", "/api/v9/guilds/123/messages/search", "/api/v9/channels/2/messages/10/reactions/%F0%9F%91%8D"} {
 		if Endpoint(p) == "" {
 			t.Fatal(p)
 		}
@@ -32,5 +32,8 @@ func TestScope(t *testing.T) {
 	}
 	if ImageExtension("image/svg+xml") != "" {
 		t.Fatal("active SVG allowed")
+	}
+	if AvatarPath("3", "hash") != "/avatars/3/hash.png" || AvatarPath("3", "a_hash") != "/avatars/3/a_hash.gif" || AvatarPath("3", "../evil") != "" {
+		t.Fatal("unsafe avatar path")
 	}
 }

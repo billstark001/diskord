@@ -51,6 +51,21 @@ func TestMergingTombstonesAndFKs(t *testing.T) {
 	if deleted != 1 {
 		t.Fatal("tombstone resurrected")
 	}
+	put(model.Message{ID: "5", Deleted: model.Ptr(true), Revision: 0})
+	put(model.Message{ID: "5", Content: model.Ptr("previously unseen body"), Revision: 10})
+	rows, e = s.Messages(ctx, model.Filter{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	var found bool
+	for _, row := range rows {
+		if row.ID == "5" && row.Deleted && row.Content == "previously unseen body" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("tombstone blocked later observed body")
+	}
 }
 
 func TestNavigationAndScopedMessages(t *testing.T) {
@@ -111,5 +126,150 @@ func TestNavigationAndScopedMessages(t *testing.T) {
 	rows, err = s.Messages(ctx, model.Filter{GuildID: "1", ChannelID: "3"})
 	if err != nil || len(rows) != 1 || rows[0].ID != "10" {
 		t.Fatalf("channel messages: %+v, %v", rows, err)
+	}
+}
+func TestReactionNamesAndMessageIdentity(t *testing.T) {
+	r := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(k, os.Getenv(k))
+	}
+	if err := securefs.Prepare(r); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	apply := func(b model.Batch) {
+		t.Helper()
+		if err := s.Apply(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(model.Batch{Source: "http", Messages: []model.Message{{ID: "10", Content: model.Ptr("first"), Revision: 10, HasReactions: true, Reactions: []model.Reaction{{EmojiName: "👍", Count: 2}}}}})
+	apply(model.Batch{Source: "ws", Users: []model.User{{ID: "3", Username: model.Ptr("Alice")}}, ReactionChanges: []model.ReactionChange{{MessageID: "10", EmojiName: "👍", UserID: "3", Operation: "observe"}}})
+	apply(model.Batch{Source: "ws", Messages: []model.Message{{ID: "10", Content: model.Ptr("edited"), Revision: 20}}})
+	apply(model.Batch{Source: "ws", Messages: []model.Message{{ID: "10", Deleted: model.Ptr(true), Revision: 21}}})
+	apply(model.Batch{Source: "ws", Messages: []model.Message{{ID: "10", Deleted: model.Ptr(true), Revision: 22}}})
+	rows, err := s.Messages(ctx, model.Filter{})
+	if err != nil || len(rows) != 1 || rows[0].Content != "edited" || !rows[0].Deleted {
+		t.Fatalf("message identity/edit/delete: %+v, %v", rows, err)
+	}
+	if len(rows[0].Reactions) != 1 || rows[0].Reactions[0].Count != 2 || len(rows[0].Reactions[0].Users) != 1 || rows[0].Reactions[0].Users[0] != "Alice" || rows[0].Reactions[0].UnknownCount != 1 {
+		t.Fatalf("reaction names: %+v", rows[0].Reactions)
+	}
+	apply(model.Batch{Source: "ws", ReactionChanges: []model.ReactionChange{{MessageID: "10", EmojiName: "👍", UserID: "3", Operation: "remove"}}})
+	rows, err = s.Messages(ctx, model.Filter{})
+	if err != nil || rows[0].Reactions[0].Count != 1 || len(rows[0].Reactions[0].Users) != 0 {
+		t.Fatalf("reaction removal: %+v, %v", rows, err)
+	}
+	add := model.Batch{Source: "ws", ReactionChanges: []model.ReactionChange{{MessageID: "10", EmojiName: "👍", UserID: "3", Operation: "add"}}}
+	apply(add)
+	apply(add)
+	rows, err = s.Messages(ctx, model.Filter{})
+	if err != nil || rows[0].Reactions[0].Count != 2 || len(rows[0].Reactions[0].Users) != 1 {
+		t.Fatalf("duplicate reaction add: %+v, %v", rows, err)
+	}
+	apply(model.Batch{Source: "ws", ReactionChanges: []model.ReactionChange{{MessageID: "10", Operation: "clear"}}})
+	rows, err = s.Messages(ctx, model.Filter{})
+	if err != nil || len(rows[0].Reactions) != 0 {
+		t.Fatalf("reaction clear: %+v, %v", rows, err)
+	}
+}
+func TestMissingResourcesAndCachedAvatar(t *testing.T) {
+	r := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(k, os.Getenv(k))
+	}
+	if err := securefs.Prepare(r); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	avatarPath := "/avatars/3/hash.png"
+	attachmentPath := "/attachments/2/4/a.png"
+	batch := model.Batch{Source: "http", Users: []model.User{{ID: "3", Username: model.Ptr("Alice"), Avatar: model.Ptr("hash")}}, Messages: []model.Message{{ID: "10", AuthorID: model.Ptr("3"), HasAttachments: true, Attachments: []model.Attachment{{ID: "4", MessageID: "10", Name: "a.png", Host: "cdn.discordapp.com", Path: attachmentPath}}}}}
+	if err := s.Apply(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	targets, err := s.MissingResources(ctx)
+	if err != nil || len(targets) != 2 {
+		t.Fatalf("missing targets: %+v, %v", targets, err)
+	}
+	if err := s.SaveAsset(ctx, "cdn.discordapp.com", avatarPath, "image/png", []byte("image"), 1024); err != nil {
+		t.Fatal(err)
+	}
+	targets, err = s.MissingResources(ctx)
+	if err != nil || len(targets) != 1 || targets[0].Path != attachmentPath {
+		t.Fatalf("cached avatar still missing: %+v, %v", targets, err)
+	}
+	rows, err := s.Messages(ctx, model.Filter{})
+	if err != nil || len(rows) != 1 || rows[0].AvatarHash == "" {
+		t.Fatalf("cached avatar not exposed: %+v, %v", rows, err)
+	}
+}
+func TestSchemaV1UpgradesToReactions(t *testing.T) {
+	r := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(k, os.Getenv(k))
+	}
+	if err := securefs.Prepare(r); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{"DROP TABLE reaction_users", "DROP TABLE reaction_totals", "UPDATE schema_version SET version=1"} {
+		if _, err := s.writer.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	if err := s.reader.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 2 {
+		t.Fatalf("migration version %d: %v", version, err)
+	}
+}
+func TestCustomEmojiUsesCachedImage(t *testing.T) {
+	r := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(k, os.Getenv(k))
+	}
+	if err := securefs.Prepare(r); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.Apply(ctx, model.Batch{Source: "http", Messages: []model.Message{{ID: "10", HasReactions: true, Reactions: []model.Reaction{{EmojiID: "5", EmojiName: "wave", Count: 1}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	targets, err := s.MissingResources(ctx)
+	if err != nil || len(targets) != 1 || targets[0].Path != "/emojis/5.png" {
+		t.Fatalf("emoji backfill: %+v, %v", targets, err)
+	}
+	if err := s.SaveAsset(ctx, "cdn.discordapp.com", "/emojis/5.png", "image/png", []byte("image"), 1024); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.Messages(ctx, model.Filter{})
+	if err != nil || len(rows) != 1 || len(rows[0].Reactions) != 1 || rows[0].Reactions[0].EmojiHash == "" {
+		t.Fatalf("emoji image: %+v, %v", rows, err)
 	}
 }

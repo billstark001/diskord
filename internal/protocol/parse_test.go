@@ -35,8 +35,12 @@ func TestSparseEditAndDelete(t *testing.T) {
 		t.Fatal(m)
 	}
 	b, e = Gateway([]byte(`{"op":0,"t":"MESSAGE_DELETE_BULK","d":{"ids":["1","2"],"channel_id":"3"}}`))
-	if e != nil || len(b.Messages) != 2 || !*b.Messages[0].Deleted {
+	if e != nil || len(b.Messages) != 2 || !*b.Messages[0].Deleted || b.Messages[0].Revision != 0 {
 		t.Fatal(b, e)
+	}
+	b, e = Gateway([]byte(`{"op":0,"t":"MESSAGE_UPDATE","d":{"id":"1","channel_id":"3","flags":4}}`))
+	if e != nil || len(b.Messages) != 1 || b.Messages[0].Revision != 0 {
+		t.Fatal("metadata-only update advanced content revision", b, e)
 	}
 }
 func TestHTTPAndSignedAttachment(t *testing.T) {
@@ -75,5 +79,19 @@ func TestOutageNotDeletion(t *testing.T) {
 	b, e := Gateway([]byte(`{"op":0,"t":"GUILD_DELETE","d":{"id":"1","unavailable":true}}`))
 	if e != nil || b.Guilds[0].Deleted != nil {
 		t.Fatal(b, e)
+	}
+}
+func TestReactionsFromSnapshotsAndEvents(t *testing.T) {
+	b, err := HTTP("/api/v9/channels/2/messages", []byte(`[{"id":"10","channel_id":"2","reactions":[{"count":2,"emoji":{"id":null,"name":"👍"}}]}]`))
+	if err != nil || len(b.Messages) != 1 || !b.Messages[0].HasReactions || len(b.Messages[0].Reactions) != 1 || b.Messages[0].Reactions[0].Count != 2 {
+		t.Fatalf("reaction snapshot: %+v, %v", b, err)
+	}
+	b, err = Gateway([]byte(`{"op":0,"t":"MESSAGE_REACTION_ADD","d":{"message_id":"10","user_id":"3","emoji":{"id":null,"name":"👍"},"member":{"user":{"id":"3","username":"Alice"}}}}`))
+	if err != nil || len(b.ReactionChanges) != 1 || b.ReactionChanges[0].Operation != "add" || len(b.Users) != 1 {
+		t.Fatalf("reaction add: %+v, %v", b, err)
+	}
+	b, err = HTTP("/api/v9/channels/2/messages/10/reactions/%F0%9F%91%8D", []byte(`[{"id":"4","username":"Bob"}]`))
+	if err != nil || len(b.ReactionChanges) != 1 || b.ReactionChanges[0].Operation != "observe" || b.ReactionChanges[0].EmojiName != "👍" {
+		t.Fatalf("reaction users: %+v, %v", b, err)
 	}
 }
