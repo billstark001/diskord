@@ -55,28 +55,40 @@ $Chrome = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 
 `--disable-quic` keeps initial testing focused on the TCP proxy; it does not disable TLS verification. The effect of arguments may still vary across Chromium builds. Do not add `--ignore-certificate-errors`, `--no-sandbox`, or network/TLS dump arguments. This project does not provide those bypasses.
 
-Visit the test channel, send a message with a unique marker, and search for it in the console. An increasing HTTP counter with a zero Gateway counter does not establish that real-time WS capture works. Check the proxy arguments, whether the client was fully restarted, whether Gateway is captured as JSON, and the “unsupported WS encoding/lost synchronization” counters.
+Visit the test channel, send a message with a unique marker, and search for it in the console. An increasing HTTP counter with a zero Gateway counter does not establish that real-time WS capture works. Check the proxy arguments, whether the client was fully restarted, whether Gateway was parsed as JSON or supported ETF, and the “unsupported WS encoding/lost synchronization” counters.
 
 ## 3. Discord desktop client
 
 First exit completely, including the Windows tray app or any process still running on macOS. Closing only the window usually does not guarantee launch arguments are reapplied. After confirming exit, start the actual Discord program, not an updater or old shortcut that may swallow arguments.
 
-Candidate macOS launch path:
+On macOS, search the usual system and user application folders, then let Launch Services start the app independently of this terminal:
 
 ```sh
-"/Applications/Discord.app/Contents/MacOS/Discord" \
-  --proxy-server="http://127.0.0.1:3901" \
-  --disable-quic
+found=0
+for app in /Applications/Discord.app "$HOME/Applications/Discord.app"; do
+  if [ -x "$app/Contents/MacOS/Discord" ]; then
+    open -a "$app" --args --proxy-server=http://127.0.0.1:3901 --disable-quic
+    found=1
+    break
+  fi
+done
+[ "$found" -eq 1 ] || echo 'Discord.app was not found in the usual application folders.' >&2
 ```
 
-Windows version directories change. First locate the actual installed `Discord.exe` path; do not copy an invented version number:
+On Windows, search the per-user versioned installation and common machine-wide locations, then launch the real `Discord.exe` rather than `Update.exe`:
 
 ```powershell
-$Discord = 'C:\Path\To\Installed\Discord\Discord.exe'
-& $Discord '--proxy-server=http://127.0.0.1:3901' '--disable-quic'
+$candidates = @(
+  Get-ChildItem "$env:LOCALAPPDATA\Discord\app-*\Discord.exe" -ErrorAction SilentlyContinue
+  Get-Item "$env:ProgramFiles\Discord\Discord.exe" -ErrorAction SilentlyContinue
+  Get-Item "${env:ProgramFiles(x86)}\Discord\Discord.exe" -ErrorAction SilentlyContinue
+) | Where-Object { $_ }
+$Discord = $candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $Discord) { throw 'Discord.exe was not found in the usual installation folders.' }
+Start-Process -FilePath $Discord.FullName -ArgumentList '--proxy-server=http://127.0.0.1:3901','--disable-quic'
 ```
 
-These commands are integration attempts, not tested guarantees. Client updates, release channels, organizational policies, or built-in network implementations may change behavior. If the client rejects the CA, ignores the proxy, or uses an unsupported encoding, record its version and nonsensitive counters and stop acceptance testing for that path. Do not inject into the process, modify the client, bypass pinning, or disable TLS verification.
+These commands are integration attempts, not tested guarantees. Client updates, release channels, organizational policies, or built-in network implementations may change behavior. If the client rejects the CA, ignores the proxy, or uses an unsupported encoding, record its version and nonsensitive counters and stop acceptance testing for that path. JSON and the supported subset of ETF Gateway events are observed without changing the client's negotiated encoding. Do not inject into the process, modify the client, bypass pinning, or disable TLS verification.
 
 The application does not automatically change Discord's own user-data path, collect UDP voice/video/WebRTC traffic, or guarantee that every desktop network request uses Chromium's proxy layer. The console shows only data that actually passed through a supported capture path.
 
