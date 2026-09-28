@@ -20,7 +20,18 @@ func arr(b json.RawMessage) []json.RawMessage {
 	_ = json.Unmarshal(b, &a)
 	return a
 }
-func str(b json.RawMessage) string { var s string; _ = json.Unmarshal(b, &s); return s }
+func str(b json.RawMessage) string {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		return s
+	}
+	// ETF snowflakes are often integers. Marshal preserves their decimal
+	// digits; never route them through float64 or lose precision.
+	if model.ID(string(b)) {
+		return string(b)
+	}
+	return ""
+}
 func sp(o object, k string) *string {
 	b, ok := o[k]
 	if !ok || string(b) == "null" {
@@ -54,14 +65,15 @@ func bp(o object, k string) *bool {
 	}
 	return &v
 }
-func validptr(p *string) *string {
-	if p == nil || !model.ID(*p) {
+func idp(o object, k string) *string {
+	s := str(o[k])
+	if !model.ID(s) {
 		return nil
 	}
-	return p
+	return &s
 }
 func inherited(o object, k, defaultID string) *string {
-	if p := validptr(sp(o, k)); p != nil {
+	if p := idp(o, k); p != nil {
 		return p
 	}
 	if model.ID(defaultID) {
@@ -122,7 +134,7 @@ func (p *parser) channel(o object, gid string, deleted bool) {
 	if !model.ID(id) {
 		return
 	}
-	c := model.Channel{ID: id, GuildID: inherited(o, "guild_id", gid), ParentID: validptr(sp(o, "parent_id")), Name: sp(o, "name"), Type: ip(o, "type"), Deleted: model.Ptr(deleted)}
+	c := model.Channel{ID: id, GuildID: inherited(o, "guild_id", gid), ParentID: idp(o, "parent_id"), Name: sp(o, "name"), Type: ip(o, "type"), Deleted: model.Ptr(deleted)}
 	if _, ok := o["recipients"]; ok {
 		c.Recipients = make([]string, 0)
 	}

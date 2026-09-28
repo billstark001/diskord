@@ -62,6 +62,15 @@ func TestGuildSearchResults(t *testing.T) {
 		t.Fatalf("search message lost guild relationship: %+v", b)
 	}
 }
+func TestNumericSnowflakesPreserveDigits(t *testing.T) {
+	b, e := Gateway([]byte(`{"op":0,"t":"READY","d":{"guilds":[{"id":9007199254740993,"properties":{"name":"Example"},"channels":[{"id":9007199254740995,"parent_id":9007199254740994,"name":"child"}]}]}}`))
+	if e != nil || len(b.Guilds) != 1 || len(b.Channels) != 1 {
+		t.Fatalf("numeric IDs were dropped: %+v, %v", b, e)
+	}
+	if b.Guilds[0].ID != "9007199254740993" || b.Channels[0].ID != "9007199254740995" || b.Channels[0].ParentID == nil || *b.Channels[0].ParentID != "9007199254740994" {
+		t.Fatalf("numeric IDs lost precision: %+v", b)
+	}
+}
 func TestOutageNotDeletion(t *testing.T) {
 	b, e := Gateway([]byte(`{"op":0,"t":"GUILD_DELETE","d":{"id":"1","unavailable":true}}`))
 	if e != nil || b.Guilds[0].Deleted != nil {

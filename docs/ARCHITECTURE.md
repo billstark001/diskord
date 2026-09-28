@@ -18,7 +18,7 @@ Read only successful           Observe only server -> client
 allowlisted responses
       |                            |
 Bounded HTTP queue /           Bounded byte queue / continuous
- decompression                 decompression / JSON framing
+ decompression                 decompression / JSON or ETF framing
       +------------+---------------+
                    |
           Explicit field projection -> model.Batch
@@ -46,9 +46,9 @@ REST entry points cover user profiles, guild/channel profiles and lists, message
 
 Gateway CONNECT verifies that authority and SNI agree and uses normal TLS certificate verification upstream. The handshake explicitly carries necessary Origin / User-Agent / Accept-Language fields, without forwarding cookies or Authorization. The Discord Gateway client's authentication payload passes through as client WS data.
 
-Forwarding uses `NextReader/NextWriter` and a 32 KiB buffer; the client-direction observer is nil. The server-direction observer has only 64 byte-block slots, each at most 32 KiB. JSON events have a separate decompressed-size limit. The zlib/zstd reader persists for the lifetime of the connection instead of reinitializing its dictionary for each message. The JSON framer handles concatenated objects, nested structures, escaped characters, and whitespace between objects.
+Forwarding uses `NextReader/NextWriter` and a 32 KiB buffer; the client-direction observer is nil. The server-direction observer has only 64 byte-block slots, each at most 32 KiB. Decoded events have a separate size limit. The zlib/zstd reader persists for the lifetime of the connection instead of reinitializing its dictionary for each message. The JSON framer handles concatenated objects, nested structures, escaped characters, and whitespace between objects. The ETF decoder reads one bounded versioned term at a time with limits on nesting and collection sizes.
 
-The client's original URL parameters determine WS compression and encoding; `encoding` and `compress` are not modified. ETF and unknown encodings are not parsed, and there is no automatic “force JSON” feature. gorilla handles WS control frames, close reasons are not archived, and the proxy may change link-layer ping/pong/close behavior. Application messages are forwarded in their received direction. This is not a byte-for-byte transparent TLS/WebSocket packet replayer.
+The client's original URL parameters determine WS compression and encoding; `encoding` and `compress` are not modified. A bounded ETF subset is decoded into the same explicitly projected events as JSON; unknown ETF tags and encodings are not parsed, and there is no automatic “force JSON” feature. gorilla handles WS control frames, close reasons are not archived, and the proxy may change link-layer ping/pong/close behavior. Application messages are forwarded in their received direction. This is not a byte-for-byte transparent TLS/WebSocket packet replayer.
 
 Once the observation queue exceeds its limit or decoding fails, parsing a compressed stream after missing bytes with a fresh dictionary would be invalid. Observation therefore stops for that connection while forwarding continues. The dashboard shows counters for lost synchronization, unsupported encodings, and decode errors. The forwarding layer also has a hard limit of 128 MiB per WS message; exceeding it interrupts the connection. This differs from the capture layer's “skip but continue” behavior.
 

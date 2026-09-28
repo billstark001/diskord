@@ -2,12 +2,14 @@ package capture
 
 import (
 	"compress/zlib"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/url"
 	"sync"
 	"sync/atomic"
 
+	"diskord/internal/etf"
 	"diskord/internal/protocol"
 	"diskord/internal/streamjson"
 	"github.com/klauspost/compress/zstd"
@@ -42,7 +44,7 @@ func (r *chunksReader) Read(p []byte) (int, error) {
 func (e *Engine) ObserveGateway(query url.Values) *Observer {
 	encoding := query.Get("encoding")
 	compression := query.Get("compress")
-	if (encoding != "" && encoding != "json") || (compression != "" && compression != "zlib-stream" && compression != "zstd-stream") {
+	if (encoding != "" && encoding != "json" && encoding != "etf") || (compression != "" && compression != "zlib-stream" && compression != "zstd-stream") {
 		e.Metrics.UnsupportedGateway.Add(1)
 		return nil
 	}
@@ -69,16 +71,36 @@ func (e *Engine) ObserveGateway(query url.Values) *Observer {
 				defer z.Close()
 			}
 		}
-		if err == nil {
-			err = streamjson.Read(reader, e.Config().Capture.MaxEventBytes, func(data []byte) error {
-				b, err := protocol.Gateway(data)
+		consume := func(data []byte) error {
+			b, err := protocol.Gateway(data)
+			if err != nil {
+				return err
+			}
+			e.Metrics.GatewayEvents.Add(1)
+			e.Submit(b)
+			return nil
+		}
+		if err == nil && encoding == "etf" {
+			for {
+				var event any
+				event, err = etf.Decode(reader, e.Config().Capture.MaxEventBytes)
 				if err != nil {
-					return err
+					break
 				}
-				e.Metrics.GatewayEvents.Add(1)
-				e.Submit(b)
-				return nil
-			})
+				var data []byte
+				data, err = json.Marshal(event)
+				if err == nil && len(data) > e.Config().Capture.MaxEventBytes {
+					err = errors.New("decoded ETF event exceeds size limit")
+				}
+				if err == nil {
+					err = consume(data)
+				}
+				if err != nil {
+					break
+				}
+			}
+		} else if err == nil {
+			err = streamjson.Read(reader, e.Config().Capture.MaxEventBytes, consume)
 		}
 		// Continuous compression streams usually have no final checksum on disconnect.
 		if err != nil && !errors.Is(err, io.EOF) && !o.closed.Load() {

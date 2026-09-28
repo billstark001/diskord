@@ -152,7 +152,7 @@ HTTP observes only successful JSON responses on allowlisted paths. It does not s
 
 Here, “does not capture tokens” refers to authentication fields in the protocol. Forwarding necessarily handles decrypted bytes briefly in process memory. Passwords or secrets users put in message bodies are not automatically detected or redacted by a content filter. Message bodies retained in the main database remain sensitive data.
 
-Gateway supports JSON, continuous `zlib-stream`, and `zstd-stream` implementation paths. It does not change client negotiation, downgrade to plaintext, or force a different encoding. ETF and unknown encodings are forwarded and counted but not parsed. The undisclosed payload structures used by first-party Discord clients may differ from the public API documentation, so each version needs testing.
+Gateway supports JSON and a bounded subset of ETF with continuous `zlib-stream` and `zstd-stream` decompression. It does not change client negotiation, downgrade to plaintext, or force a different encoding. Unknown ETF tags and encodings are forwarded but not parsed, with errors counted. The undisclosed payload structures used by first-party Discord clients may differ from the public API documentation, so each version needs testing.
 
 Raw traffic is not written to disk. Resource caching is off by default; when enabled, it caches only images that already pass through the proxy, without replaying signed URLs or actively fetching missing resources. It records only relationships observable between attachments and actually cached files. URLs for different transcodes or sizes are not guaranteed to be merged.
 
