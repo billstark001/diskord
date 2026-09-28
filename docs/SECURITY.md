@@ -10,6 +10,8 @@ This does not mean sensitive bytes never appear in memory: MITM forwarding must 
 
 Capture errors appear only as aggregate counters; payloads containing authentication fields are not added to logs. When diagnosing issues, do not casually enable upstream debugging, TLS key logging, HTTP dumps, or sharing of a real runtime directory.
 
+Both optional file loggers are off by default. `logs/diskord.log` receives application diagnostics when enabled; `logs/discord.log` receives the desktop client's own stdout and stderr only when launched through `diskord discord launch`. Treat Discord output as sensitive and do not share it without review. The diskord log has a size limit and three backups; the Discord log is rotated at launch and can grow during a long client session.
+
 ## Files and certificates
 
 Application-owned directories default to Unix mode 0700, and application-owned files to 0600. On Windows, these paths receive protected DACLs for the current user and SYSTEM. The application does not change the permissions of the user's working directory itself, which might contain other files. A dedicated private directory is therefore still recommended.
@@ -26,7 +28,7 @@ The console accepts only literal loopback listeners and rejects other Hosts, cro
 
 The session key is a shared random value in the process, not a separate server-side session record for each login. Logging out clears the current browser cookie; it does not revoke individual sessions server-side. Stopping the process invalidates sessions. This model suits a single-user local prototype, not multi-user administration. The console uses loopback HTTP rather than a Secure cookie and must not be exposed through another network interface or a public reverse proxy.
 
-templ escapes message text and does not render user Markdown/HTML. CSS and htmx are embedded, with no reliance on external sites. CSP blocks arbitrary scripts and objects; pages use no-store; htmx history caching, eval, and script processing are disabled. Resource images are read through authenticated local endpoints rather than making the browser request the Discord CDN directly. Turning off resource display does not delete existing files.
+Preact renders message text as text and does not interpret user Markdown/HTML. The compiled JavaScript and CSS are embedded, with no reliance on external sites. CSP blocks external and inline scripts, arbitrary objects, and cross-origin requests; responses use no-store. The access token is sent only to the local login API and is not saved in browser storage. Resource images are read through authenticated local endpoints rather than making the browser request the Discord CDN directly. Turning off resource display does not delete existing files.
 
 ## Remaining risks
 

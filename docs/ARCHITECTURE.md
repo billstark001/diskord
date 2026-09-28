@@ -27,10 +27,10 @@ Bounded HTTP queue /           Bounded byte queue / continuous
                    |
            main.sqlite / resources/
                    |
-       templ SSR + local htmx console
+       embedded Preact console + local JSON APIs
 ```
 
-The console selects `zh-CN` or `en` per request from a local preference cookie or `Accept-Language`. A CSRF-protected form changes the preference. The messages page queries a sorted guild list and channels for the selected guild (or the observed DM/unknown scope), groups channels by observed parent category, and filters the local message table. The server renders full pages and htmx fragments from the same locale; no Discord API requests are made by the console.
+The console selects `zh-CN` or `en` from a local preference cookie or `Accept-Language`. A CSRF-protected JSON request changes the preference. The Go server exposes same-origin JSON endpoints for sessions, observed navigation, messages, status, settings, and CA operations. The Preact frontend keeps route and scroll state client-side and requests only the local archive. No Discord API requests are made by the console. Vite compiles the frontend into `internal/ui/webdist/`, which Go embeds into a single binary.
 
 The non-target CONNECT branch is an undecrypted tunnel and does not enter either capture branch. The HTTP backend's random loopback port does not imply a separate process or deployed service; it remains inside the same binary. The upstream library interface accepts a listen address, not an already-bound listener, so there is a race between choosing a free port and startup. Startup verifies identity through a random health-check path and response; a conflict should fail startup rather than connect to another local service by mistake.
 

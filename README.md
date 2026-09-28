@@ -1,6 +1,6 @@
 # diskord · Local Discord Message Observation Proxy
 
-Go 1.27 / go-mitmproxy / templ + htmx / SQLite, v0.1 prototype. The repository contains the source code, pinned Go dependency checksums, generated templ Go files, and embedded htmx 4.0.0. The local `dist/` directory holds only built binaries. See `TEST_REPORT.md` for build and automated test results; integration with the Discord desktop client still needs to be tested on each target machine.
+Go 1.27 / go-mitmproxy / Preact + TypeScript + Vite / SQLite, v0.1 prototype. The console uses signals, TanStack Query, vanilla-extract styles, and a small built-in Chinese/English dictionary. The repository includes pinned Go and pnpm dependency checksums and the built frontend assets embedded into the Go binary. The local `dist/` directory holds only built binaries. See `TEST_REPORT.md` for build and automated test results; integration with the Discord desktop client still needs to be tested on each target machine.
 
 Observe only local traffic from your own devices and accounts, or traffic for which you have explicit authorization. The application does not automatically install a root certificate, change the system proxy, request Discord history, read browser account databases, or extract or replay authentication credentials.
 
@@ -8,9 +8,9 @@ Observe only local traffic from your own devices and accounts, or traffic for wh
 
 | Requirement | Implementation |
 | --- | --- |
-| Single binary | The final Go binary embeds templ-generated pages, CSS, and the actual htmx library. SQLite uses a pure Go driver, and the final build disables CGO. |
+| Single binary | The final Go binary embeds the compiled Preact console. SQLite uses a pure Go driver, and the final build disables CGO. |
 | One YAML file / one runtime directory | Defaults to `diskord.yaml` and `runtime_dir: .`, where `.` is the process working directory. Temporary writes controlled by the application go under `tmp/` in the runtime directory. |
-| Console | Defaults to `127.0.0.1:3900`; provides Chinese/English pages, an observed server/category/channel browser, message search and pagination, a resource toggle, and CA issuance and selection. |
+| Console | Defaults to `127.0.0.1:3900`; provides Chinese/English pages, a read-only observed server/category/channel browser, message search and pagination, a resource toggle, and CA issuance and selection. The Preact shell preserves scroll position across local actions. |
 | Persistent proxy | Defaults to `127.0.0.1:3901`; starts with `run`, operates whether or not the web page is open, and stops when the process exits. |
 | CA | Invokes system OpenSSL explicitly; requires certificate and private key paths, reports a missing tool, validates the certificate before selection, and never grants trust automatically. |
 | Configuration updates | Patches YAML nodes, preserves unrelated nodes and comments where possible, checks a revision hash, stages writes inside the runtime directory, and replaces the file atomically. |
@@ -24,12 +24,12 @@ This is an archive built from observed traffic, not a full client sync: historic
 
 ## Build
 
-Building from source requires Go 1.27 or newer. The repository includes generated page code and the htmx file; resolving Go modules for the first time may still require network access. Node/npm is not required. Issuing a root CA also requires an OpenSSL executable. Normal `run` operation with a selected CA does not require Go, the templ CLI, or a continuously running OpenSSL process.
+Building from source requires Go 1.27 or newer, Node 26, and pnpm 12.6.0. Run `pnpm -C frontend install --frozen-lockfile` and `pnpm -C frontend run build` to compile the frontend separately, or use the build scripts below. Resolving dependencies for the first time may require network access. The final binary needs neither Node nor pnpm. Issuing a root CA also requires an OpenSSL executable. Normal `run` operation with a selected CA does not require a development toolchain.
 
 macOS / Linux developers can use the Makefile:
 
 ```sh
-make lint      # gofmt, templ fmt/generate checks, go vet, Staticcheck
+make lint      # gofmt, frontend type/format checks, go vet, Staticcheck
 make verify    # lint plus Go race tests
 make audit     # scan the Go vulnerability database
 make build     # binary for the current platform
@@ -56,15 +56,15 @@ Windows PowerShell:
 # .\scripts\build.ps1 -TargetOS windows -TargetArch arm64
 ```
 
-The build scripts verify the pinned htmx version, generate templ Go code, resolve module dependencies, run tests, and create `dist/diskord-<os>-<arch>[.exe]`. They stop if any step fails. Build caches and temporary files go under the project's `.build/` directory, which is not deployment content.
+The build scripts install from the pinned pnpm lockfile, typecheck and compile the frontend, resolve Go dependencies, run tests, and create `dist/diskord-<os>-<arch>[.exe]`. They stop if any step fails. Generated frontend assets in `internal/ui/webdist/` are ignored by Git. The frontend build script hashes its source inputs and verifies cached output hashes, so repeated builds reuse unchanged assets. Set `FORCE_FRONTEND_BUILD=1` (PowerShell: `$env:FORCE_FRONTEND_BUILD = '1'`) to rebuild them, or run `make generate`. Build caches and temporary files go under `.build/`.
 
-Prebuilt binaries in `dist/` are unsigned and not notarized. You can build directly from source with `go build ./cmd/diskord`, but Go modules are not vendored; an offline rebuild still requires a populated module cache. The target system trust chain and the behavior of Chrome and the Discord desktop application must be tested using `docs/ACCEPTANCE.md`.
+Prebuilt binaries in `dist/` are unsigned and not notarized. On a fresh checkout, build the frontend first with `node scripts/build-frontend.mjs` before running `go build ./cmd/diskord`, or use the project build script. Go modules are not vendored; an offline rebuild still requires a populated module cache. The target system trust chain and the behavior of Chrome and the Discord desktop application must be tested using `docs/ACCEPTANCE.md`.
 
 ## GitHub releases
 
 Ordinary commits and PRs run builds, linting, and tests. After a `vX.Y.Z` tag is pushed, CI waits for validation and all four platform builds to pass, then creates a GitHub Release with four separate binaries. [GitHub automatically provides](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases) standard **Source code (zip)** and **Source code (tar.gz)** archives for the tag; the project does not make another local source ZIP. Hyphenated prerelease tags are marked as prereleases.
 
-Before release, commit `go.sum`, `internal/ui/views_templ.go`, and `internal/ui/static/htmx.min.js` in the tagged commit. CI checks that Git tracks these files and that regeneration produces no changes. The release workflow runs only when a tag is pushed; a local `make dist` does not publish a release.
+Before release, commit `go.sum` and `frontend/pnpm-lock.yaml` in the tagged commit. CI builds the ignored frontend assets before compiling the single-file binaries. The release workflow runs only when a tag is pushed; a local `make dist` does not publish a release.
 
 ## First run
 
@@ -93,7 +93,7 @@ Log in with the token. The proxy address is:
 http://127.0.0.1:3901
 ```
 
-The console selects Chinese or English from your browser language on first visit. Use the language control on the login page or in the header to override it. The message page presents observed servers, categories, and channels in a read-only three-column archive. Missing servers or channels are not fetched from Discord; they appear only after the proxy observes them. The narrow layout stacks the channel list above messages.
+The console selects Chinese or English from your browser language on first visit. Use the language control on the login page or in the header to override it. The message page presents observed servers, categories, and channels in a read-only three-column archive. Missing servers or channels are not fetched from Discord; they appear only after the proxy observes them. The narrow layout stacks the channel list above messages. The frontend uses same-origin JSON APIs and an HttpOnly session cookie; it does not store the access token in browser storage.
 
 Follow `docs/PLATFORMS.md` to **manually verify and trust the public CA certificate**, then explicitly configure test Chrome / Discord desktop processes to use the proxy. Never import `root.key` into a browser, send it to anyone, or commit it to the repository.
 
@@ -116,9 +116,14 @@ See `diskord.example.yaml` for the default configuration. Initialization does no
 ./diskord --config /absolute/path/diskord.yaml run
 ./diskord config set resources.enabled true
 ./diskord config set resources.enabled false
+./diskord config set logging.file.enabled true
+./diskord config set logging.discord.enabled true
+./diskord discord launch
 ```
 
 The configuration file may be outside the runtime directory, but it must be on the same file system for atomic replacement from `runtime/tmp/`. Cross-file-system updates fail rather than falling back to the system temporary directory.
+
+Both file loggers are disabled by default. `logging.file.enabled` writes diskord application logs to `logs/diskord.log`, with three 10 MiB backups, while retaining stderr output. `logging.discord.enabled` redirects Discord stdout and stderr to `logs/discord.log` when it is started with `diskord discord launch`; an already running Discord process is unaffected. Quit Discord completely before using that command so its proxy arguments take effect. The launcher searches typical installation paths; pass `--path` if necessary. Discord output is rotated when launched, but a single long-running Discord session may grow past 10 MiB. Restart diskord for changes to its file logger to take effect.
 
 `ca.cert` and `ca.key` accept paths relative to the runtime directory or absolute paths. Paths that escape the directory or contain symbolic links are rejected. The CA is a locally self-signed root certificate, not a public CA certificate requested for an external domain. `ca issue` requires two explicit, distinct paths to files that do not yet exist; issuance does not automatically select or trust the CA.
 
@@ -142,6 +147,7 @@ runtime/
     ui-token           # Local administration token
     diskord.lock       # File used for the operating system lock
   tmp/                 # Staging for atomic writes, temporary OpenSSL config, etc.
+  logs/                # Optional diskord and Discord file logs
 ```
 
 These constraints apply to **file writes controlled by diskord itself**. They do not mean the operating system or external clients never write files: system certificate stores, Chrome / Discord configuration, swap, crash dumps, and security software are outside the application's control. A separate Chrome profile can be placed under the runtime directory for testing; diskord does not take over Discord's normal data directory.
