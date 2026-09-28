@@ -452,3 +452,44 @@ footer {
     padding: 20px
   }
 }
+/* The archive stays read-only; navigation changes only local filters. */
+.top .language, .login-card .language {display:flex;align-items:center;gap:8px;margin:0}
+.language label {margin:0;white-space:nowrap}
+.language select {font:inherit;border:1px solid var(--line);border-radius:6px;background:var(--white);padding:7px;min-height:36px}
+.language button {padding:7px 10px}
+.login-card .language {margin:22px 0;flex-wrap:wrap}
+.login-card .language button {width:auto}
+.archive {display:grid;grid-template-columns:72px 250px minmax(0,1fr);min-height:calc(100vh - 175px);background:#fff}
+.guild-rail {background:#20242b;padding:18px 10px;display:flex;align-items:center;flex-direction:column;gap:12px;overflow:auto}
+.guild-rail a {display:grid;place-items:center;width:48px;height:48px;border-radius:15px;background:#3a404b;color:#fff;font-weight:750;font-size:20px;flex:none;overflow:hidden}
+.guild-rail a:hover,.guild-rail a.active {background:#526fe3;border-radius:12px;text-decoration:none}
+.rail-divider {height:1px;width:35px;background:#555d6b;margin:3px 0}
+.channel-sidebar {padding:20px 10px;background:#eff1f4;border-right:1px solid var(--line);overflow:auto}
+.channel-sidebar h2 {font-size:16px;padding:0 10px;overflow-wrap:anywhere}
+.channel-sidebar a {display:block;padding:7px 10px;border-radius:6px;color:#46515e;overflow-wrap:anywhere}
+.channel-sidebar a:hover,.channel-sidebar a.active {background:#dce2ed;color:#192631;text-decoration:none}
+.channel-sidebar a span {color:#83909c}
+.channel-sidebar .category {font-size:11px;font-weight:800;text-transform:uppercase;color:#63717e;padding:18px 10px 4px;overflow-wrap:anywhere}
+.channel-sidebar .muted {padding:10px;font-size:13px}
+.archive-content {min-width:0;padding:24px clamp(16px,3vw,42px);background:var(--paper)}
+.archive-content>header h1 {font-size:23px;margin:0 0 6px}
+.archive-content>header p {font-size:13px;color:var(--muted);margin-bottom:22px}
+.archive-content .message {margin-bottom:10px;padding:16px 20px}
+.archive-content .search {grid-template-columns:minmax(180px,2fr) minmax(100px,1fr) minmax(100px,1fr) auto auto;padding:16px}
+.archive-content .search input {min-width:0}
+@media(max-width:900px) {
+ .archive {grid-template-columns:60px 210px minmax(0,1fr)}
+ .guild-rail a {width:42px;height:42px}
+ .archive-content .search {grid-template-columns:1fr 1fr}
+ .archive-content .search label:first-child {grid-column:1/-1}
+}
+@media(max-width:650px) {
+ .archive {grid-template-columns:54px minmax(0,1fr)}
+ .guild-rail {grid-row:1/3;padding:12px 5px}
+ .guild-rail a {width:42px;height:42px}
+ .channel-sidebar {grid-column:2;max-height:190px}
+ .archive-content {grid-column:2;padding:16px 12px}
+ .archive-content .search {grid-template-columns:1fr}
+ .archive-content .search label:first-child {grid-column:auto}
+ .top .language {order:3}
+}
