@@ -57,7 +57,11 @@ templ Page(v View) {
 						<h1>设置与证书</h1>
 						<p class="lead">修改采用 YAML 节点级补丁与原子替换。并发更改会被拒绝，不会静默覆盖。</p>
 						<section class="panel"><h2>资源收集</h2><form action="/settings" method="post"><input type="hidden" name="csrf" value={ v.CSRF }/><input type="hidden" name="revision" value={ v.Revision }/><label class="check"><input type="checkbox" name="resources" checked?={ v.Config.Resources.Enabled }/>允许保存 CDN 图像资源</label><p class="muted">关闭时不拦截新的 CDN 连接，也不展示缓存。不会主动下载；旧文件不会自动删除。拒绝 SVG、HTML 与任意第三方域名。</p><button type="submit">保存设置</button></form></section>
-						<section class="panel"><h2>当前 CA</h2><dl><dt>证书</dt><dd><code>{ v.Config.CA.Cert }</code></dd><dt>私钥</dt><dd><code>{ v.Config.CA.Key }</code></dd><dt>SHA-256 指纹</dt><dd class="break"><code>{ v.Fingerprint }</code></dd><dt>有效期至</dt><dd>{ v.Expires }</dd></dl><p class="muted">只在内存中签发站点叶证书。更换 CA 后，请手动调整信任并重新连接客户端。</p></section>
+						<section class="panel"><h2>当前 CA</h2><dl><dt>证书</dt><dd><code>{ v.Config.CA.Cert }</code></dd><dt>私钥</dt><dd><code>{ v.Config.CA.Key }</code></dd><dt>SHA-256 指纹</dt><dd class="break"><code>{ v.Fingerprint }</code></dd><dt>有效期至</dt><dd>{ v.Expires }</dd></dl><p class="muted">只在内存中签发站点叶证书。更换 CA 后，请手动调整信任并重新连接客户端。</p>
+							if v.CATrustNotice != "" {
+								<p class="notice error">{ v.CATrustNotice }</p>
+							}
+						</section>
 						<section class="panel">
 							<h2>验证并选择已签发 CA</h2>
 							<form action="/ca/select" method="post">

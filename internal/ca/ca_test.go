@@ -26,6 +26,9 @@ func TestOpenSSLIssueValidateScope(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	if a.TrustedForTLS() {
+		t.Fatal("newly issued test CA unexpectedly trusted by the operating system")
+	}
 	if _, e = a.GetCert("discord.com"); e != nil {
 		t.Fatal(e)
 	}

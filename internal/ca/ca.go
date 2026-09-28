@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -100,6 +101,27 @@ func Load(root, certPath, keyPath string) (*Authority, error) {
 	return &Authority{Root: cert, signer: signer, leaves: make(map[string]*tls.Certificate)}, nil
 }
 func (a *Authority) GetRootCA() *x509.Certificate { return a.Root }
+
+// TrustedForTLS checks the operating system's current trust decision with an
+// in-memory leaf. It does not modify the trust store or write a certificate.
+func (a *Authority) TrustedForTLS() bool {
+	pair, err := a.GetCert("discord.com")
+	if err != nil {
+		return false
+	}
+	_, err = pair.Leaf.Verify(x509.VerifyOptions{DNSName: "discord.com", KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
+	return err == nil
+}
+func TrustInstructions() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "根 CA 尚未获得本机 SSL 信任。核对 SHA-256 指纹后，只将公有证书导入当前用户的登录钥匙串，并在“钥匙串访问”中为该证书设置 SSL 信任。取消信任时，按指纹找到该证书并删除或恢复默认信任。不要导入私钥；完成后重新启动客户端。"
+	case "windows":
+		return "根 CA 尚未获得本机 SSL 信任。核对 SHA-256 指纹后，在 certmgr.msc 的“当前用户 → 受信任的根证书颁发机构 → 证书”导入公有证书。取消信任时，按指纹在同一位置删除证书。不要导入私钥；完成后重新启动客户端。"
+	default:
+		return "根 CA 尚未获得本机 SSL 信任。核对 SHA-256 指纹后，在系统证书管理器中仅信任公有证书；取消信任时按指纹删除该证书。不要导入私钥；完成后重新启动客户端。"
+	}
+}
 func (a *Authority) Fingerprint() string {
 	v := sha256.Sum256(a.Root.Raw)
 	return hex.EncodeToString(v[:])

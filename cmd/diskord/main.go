@@ -146,6 +146,9 @@ func run(args []string) error {
 				return e
 			}
 			fmt.Printf("CA selected. SHA-256: %s\nInstall only the public certificate manually, never the private key.\n", selected.Fingerprint())
+			if !selected.TrustedForTLS() {
+				fmt.Println(ca.TrustInstructions())
+			}
 			return nil
 		default:
 			return errors.New("unknown CA operation")

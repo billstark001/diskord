@@ -32,6 +32,7 @@ var assets embed.FS
 
 type View struct {
 	Page, CSRF, Revision, Error, Notice, RuntimeDir, Fingerprint, Expires, Next string
+	CATrustNotice                                                               string
 	Config                                                                      config.Config
 	Counts                                                                      model.Counts
 	Stats                                                                       capture.Snapshot
@@ -335,6 +336,9 @@ func (u *UI) settingsResult(w http.ResponseWriter, r *http.Request, notice, prob
 	v := u.view("settings")
 	v.Notice = notice
 	v.Error = problem
+	if !u.Authority.Current().TrustedForTLS() {
+		v.CATrustNotice = ca.TrustInstructions()
+	}
 	if entries, e := os.ReadDir(filepath.Join(u.Manager.Root, "ca")); e == nil {
 		for _, f := range entries {
 			if f.Type().IsRegular() && strings.HasSuffix(f.Name(), ".pem") {
