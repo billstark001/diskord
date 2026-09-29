@@ -37,11 +37,24 @@ func assertPrivateLog(t *testing.T, name string, _ os.FileMode) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{"SY": true, user.User.Sid.String(): true}
+	expected := map[string]bool{"S-1-5-18": false, user.User.Sid.String(): false}
 	for _, entry := range entries {
 		fields := strings.Split(entry[1], ";")
-		if len(fields) < 6 || fields[0] != "A" || fields[2] != "FA" || !allowed[fields[5]] {
+		if len(fields) < 6 || fields[0] != "A" || fields[2] != "FA" {
 			t.Fatalf("unexpected log ACL entry: %q", entry[1])
+		}
+		sid, err := windows.StringToSid(fields[5])
+		if err != nil {
+			t.Fatalf("invalid log ACL identity %q: %v", fields[5], err)
+		}
+		if _, ok := expected[sid.String()]; !ok {
+			t.Fatalf("unexpected log ACL identity: %q", fields[5])
+		}
+		expected[sid.String()] = true
+	}
+	for sid, seen := range expected {
+		if !seen {
+			t.Fatalf("missing required log ACL identity: %s", sid)
 		}
 	}
 }
