@@ -13,7 +13,7 @@ type User struct {
 }
 type Guild struct {
 	ID                   string
-	Name                 *string
+	Name, Icon           *string
 	Unavailable, Deleted *bool
 }
 type Channel struct {
@@ -93,12 +93,14 @@ func Revision(edited, created *string, fallback int64) int64 {
 }
 
 type MessageRow struct {
-	ID, ChannelID, ChannelName, GuildName, AuthorName, Content string
-	Timestamp, EditedTimestamp, Source                         string
-	AvatarHash                                                 string
-	Deleted                                                    bool
-	Attachments                                                []AssetRow
-	Reactions                                                  []ReactionRow
+	ID, ChannelID, ChannelName, GuildID, GuildName, AuthorName, Content string
+	Timestamp, EditedTimestamp, Source                                  string
+	AvatarHash                                                          string
+	Deleted                                                             bool
+	Attachments                                                         []AssetRow
+	Reactions                                                           []ReactionRow
+	MentionNames                                                        map[string]string
+	EmojiHashes                                                         map[string]string
 }
 type ReactionRow struct {
 	EmojiID, EmojiName  string
@@ -108,7 +110,7 @@ type ReactionRow struct {
 	Users               []string
 }
 type GuildRow struct {
-	ID, Name             string
+	ID, Name, IconHash   string
 	Unavailable, Deleted bool
 }
 type ChannelRow struct {
@@ -118,7 +120,12 @@ type ChannelRow struct {
 }
 type AssetRow struct{ Name, Hash string }
 type Filter struct {
-	Query, GuildID, ChannelID, Before, Scope string
-	Limit                                    int
+	Query, GuildID, ChannelID, Before, After, Around, Scope string
+	Limit                                                   int
+}
+type MessagePage struct {
+	Rows   []MessageRow `json:"rows"`
+	Before string       `json:"before"`
+	After  string       `json:"after"`
 }
 type Counts struct{ Users, Guilds, Channels, Messages int64 }

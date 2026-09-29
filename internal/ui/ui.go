@@ -334,12 +334,12 @@ func (u *UI) navigation(w http.ResponseWriter, r *http.Request) {
 }
 func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	filter := model.Filter{Query: q.Get("q"), GuildID: q.Get("guild"), ChannelID: q.Get("channel"), Before: q.Get("before"), Scope: q.Get("scope"), Limit: 50}
+	filter := model.Filter{Query: q.Get("q"), GuildID: q.Get("guild"), ChannelID: q.Get("channel"), Before: q.Get("before"), After: q.Get("after"), Around: q.Get("around"), Scope: q.Get("scope"), Limit: 50}
 	if filter.Scope != "" && filter.Scope != "dm" || len(filter.Query) > 256 {
 		problem(w, 400, "invalid message filter")
 		return
 	}
-	for _, id := range []string{filter.GuildID, filter.ChannelID, filter.Before} {
+	for _, id := range []string{filter.GuildID, filter.ChannelID, filter.Before, filter.After, filter.Around} {
 		if id != "" && !model.ID(id) {
 			problem(w, 400, "invalid entity ID")
 			return
@@ -348,18 +348,33 @@ func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
 	if filter.GuildID != "" {
 		filter.Scope = ""
 	}
+	cursors := 0
+	for _, id := range []string{filter.Before, filter.After, filter.Around} {
+		if id != "" {
+			cursors++
+		}
+	}
+	if cursors > 1 {
+		problem(w, 400, "choose one message cursor")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	rows, err := u.Store.Messages(ctx, filter)
+	var page model.MessagePage
+	var err error
+	switch {
+	case filter.Around != "":
+		page, err = u.Store.ListAround(ctx, filter)
+	case filter.After != "":
+		page, err = u.Store.ListAfter(ctx, filter)
+	default:
+		page, err = u.Store.ListBefore(ctx, filter)
+	}
 	if err != nil {
 		problem(w, 503, "message query unavailable")
 		return
 	}
-	next := ""
-	if len(rows) == filter.Limit {
-		next = rows[len(rows)-1].ID
-	}
-	writeJSON(w, 200, map[string]any{"rows": rows, "next": next})
+	writeJSON(w, 200, page)
 }
 func (u *UI) settings(w http.ResponseWriter, r *http.Request) { u.settingsResult(w, r) }
 func (u *UI) settingsResult(w http.ResponseWriter, r *http.Request) {
@@ -454,10 +469,6 @@ func (u *UI) selectCA(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"selected": true})
 }
 func (u *UI) asset(w http.ResponseWriter, r *http.Request) {
-	if !u.Manager.Current().Resources.Enabled {
-		http.NotFound(w, r)
-		return
-	}
 	path, mime, err := u.Store.Asset(r.Context(), r.PathValue("hash"))
 	if err != nil {
 		http.NotFound(w, r)

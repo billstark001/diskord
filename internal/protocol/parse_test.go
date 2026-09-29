@@ -81,6 +81,16 @@ func TestOutageNotDeletion(t *testing.T) {
 		t.Fatal(b, e)
 	}
 }
+func TestGuildIconSnapshotsAndRemoval(t *testing.T) {
+	b, err := Gateway([]byte(`{"op":0,"t":"READY","d":{"guilds":[{"id":"1","properties":{"name":"Guild","icon":"icon_hash"}}]}}`))
+	if err != nil || len(b.Guilds) != 1 || b.Guilds[0].Icon == nil || *b.Guilds[0].Icon != "icon_hash" {
+		t.Fatalf("guild icon snapshot: %+v, %v", b, err)
+	}
+	b, err = Gateway([]byte(`{"op":0,"t":"GUILD_UPDATE","d":{"id":"1","icon":null}}`))
+	if err != nil || len(b.Guilds) != 1 || b.Guilds[0].Icon == nil || *b.Guilds[0].Icon != "" {
+		t.Fatalf("guild icon removal: %+v, %v", b, err)
+	}
+}
 func TestReactionsFromSnapshotsAndEvents(t *testing.T) {
 	b, err := HTTP("/api/v9/channels/2/messages", []byte(`[{"id":"10","channel_id":"2","reactions":[{"count":2,"emoji":{"id":null,"name":"👍"}}]}]`))
 	if err != nil || len(b.Messages) != 1 || !b.Messages[0].HasReactions || len(b.Messages[0].Reactions) != 1 || b.Messages[0].Reactions[0].Count != 2 {

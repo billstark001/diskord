@@ -71,6 +71,13 @@ func AvatarPath(id, hash string) string {
 	}
 	return "/avatars/" + id + "/" + hash + ext
 }
+func GuildIconPath(id, hash string) string {
+	path := AvatarPath(id, hash)
+	if path == "" {
+		return ""
+	}
+	return strings.Replace(path, "/avatars/", "/icons/", 1)
+}
 func ImageExtension(mime string) string {
 	switch strings.ToLower(strings.TrimSpace(strings.SplitN(mime, ";", 2)[0])) {
 	case "image/png":

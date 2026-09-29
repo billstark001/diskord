@@ -111,7 +111,7 @@ func applyReactions(tx *sql.Tx, batch model.Batch) error {
 
 func (s *Store) messageReactions(ctx context.Context, messageID string) ([]model.ReactionRow, error) {
 	rows, err := s.reader.QueryContext(ctx, `SELECT t.emoji_key,t.emoji_id,t.emoji_name,t.animated,t.count,
-        COALESCE((SELECT r.hash FROM resource_urls r WHERE r.host='cdn.discordapp.com'
+		COALESCE((SELECT r.hash FROM resource_urls r WHERE r.host IN ('cdn.discordapp.com','media.discordapp.net')
         AND substr(r.path,1,length('/emojis/'||t.emoji_id||'.'))='/emojis/'||t.emoji_id||'.' LIMIT 1),'')
         FROM reaction_totals t WHERE t.message_id=? AND t.count>0 ORDER BY t.emoji_key`, messageID)
 	if err != nil {

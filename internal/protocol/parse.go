@@ -111,7 +111,14 @@ func (p *parser) guild(o object, deleted bool) {
 	if name == nil {
 		name = sp(obj(o["properties"]), "name")
 	}
-	g := model.Guild{ID: id, Name: name, Unavailable: bp(o, "unavailable")}
+	icon := sp(o, "icon")
+	if icon == nil {
+		icon = sp(obj(o["properties"]), "icon")
+	}
+	g := model.Guild{ID: id, Name: name, Icon: icon, Unavailable: bp(o, "unavailable")}
+	if string(o["icon"]) == "null" {
+		g.Icon = model.Ptr("")
+	}
 	if deleted {
 		// A temporary outage is not a guild deletion.
 		if g.Unavailable == nil || !*g.Unavailable {

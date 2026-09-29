@@ -19,6 +19,7 @@ import (
 	"diskord/internal/model"
 	"diskord/internal/scope"
 	"diskord/internal/securefs"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -75,7 +76,49 @@ func Open(root string) (*Store, error) {
 	if e = w.QueryRow("SELECT version FROM schema_version").Scan(&version); e != nil {
 		return fail(e)
 	}
-	if version != 2 {
+	if version == 2 {
+		rows, err := w.Query("PRAGMA table_info(guilds)")
+		if err != nil {
+			return fail(err)
+		}
+		hasIcon := false
+		for rows.Next() {
+			var ordinal, required, primary int
+			var name, kind string
+			var defaultValue any
+			if err := rows.Scan(&ordinal, &name, &kind, &required, &defaultValue, &primary); err != nil {
+				rows.Close()
+				return fail(err)
+			}
+			if name == "icon" {
+				hasIcon = true
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return fail(err)
+		}
+		tx, err := w.Begin()
+		if err != nil {
+			return fail(err)
+		}
+		if !hasIcon {
+			if _, err = tx.Exec("ALTER TABLE guilds ADD COLUMN icon TEXT"); err != nil {
+				tx.Rollback()
+				return fail(err)
+			}
+		}
+		if _, err = tx.Exec("UPDATE schema_version SET version=3 WHERE version=2"); err != nil {
+			tx.Rollback()
+			return fail(err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fail(err)
+		}
+		version = 3
+	}
+	if version != 3 {
 		return fail(errors.New("unsupported database schema version"))
 	}
 	r, e := sql.Open("sqlite", u.String())
@@ -123,6 +166,10 @@ func set[T any](m map[string]any, key string, p *T) {
 		m[key] = *p
 	}
 }
+func placeholderChannelName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name == "" || name == "___hidden___"
+}
 func merge(tx *sql.Tx, table, id string, values map[string]any) error {
 	if !model.ID(id) {
 		return nil
@@ -164,6 +211,7 @@ func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 	for _, g := range b.Guilds {
 		v := map[string]any{}
 		set(v, "name", g.Name)
+		set(v, "icon", g.Icon)
 		set(v, "unavailable", g.Unavailable)
 		set(v, "deleted", g.Deleted)
 		if e = merge(tx, "guilds", g.ID, v); e != nil {
@@ -188,6 +236,16 @@ func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 			set(v, "parent_id", c.ParentID)
 		}
 		set(v, "name", c.Name)
+		if c.Name != nil && placeholderChannelName(*c.Name) {
+			var previous sql.NullString
+			err := tx.QueryRow("SELECT name FROM channels WHERE id=?", c.ID).Scan(&previous)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			if previous.Valid && !placeholderChannelName(previous.String) {
+				delete(v, "name")
+			}
+		}
 		set(v, "kind", c.Type)
 		set(v, "deleted", c.Deleted)
 		if e = merge(tx, "channels", c.ID, v); e != nil {
@@ -298,7 +356,13 @@ func (s *Store) Counts(ctx context.Context) (model.Counts, error) {
 	return c, e
 }
 func (s *Store) Guilds(ctx context.Context) ([]model.GuildRow, error) {
-	rows, err := s.reader.QueryContext(ctx, `SELECT id, COALESCE(name,''), unavailable, deleted FROM guilds ORDER BY lower(COALESCE(name,id)), id`)
+	rows, err := s.reader.QueryContext(ctx, `SELECT g.id, COALESCE(g.name,''), g.unavailable, g.deleted,
+		COALESCE((SELECT r.hash FROM resource_urls r JOIN assets a ON a.hash=r.hash
+		WHERE r.host IN ('cdn.discordapp.com','media.discordapp.net')
+		AND substr(r.path,1,length('/icons/'||g.id||'/'))='/icons/'||g.id||'/'
+		AND (g.icon IS NULL OR substr(r.path,1,length('/icons/'||g.id||'/'||g.icon||'.'))='/icons/'||g.id||'/'||g.icon||'.')
+		ORDER BY a.observed_at DESC LIMIT 1),'')
+		FROM guilds g ORDER BY lower(COALESCE(g.name,g.id)), g.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -306,21 +370,33 @@ func (s *Store) Guilds(ctx context.Context) ([]model.GuildRow, error) {
 	result := []model.GuildRow{}
 	for rows.Next() {
 		var item model.GuildRow
-		if err := rows.Scan(&item.ID, &item.Name, &item.Unavailable, &item.Deleted); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Unavailable, &item.Deleted, &item.IconHash); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
 	}
 	return result, rows.Err()
 }
+
+const channelDisplayNameSQL = `COALESCE(NULLIF(c.name,''),
+	CASE WHEN c.guild_id IS NULL THEN
+		(SELECT group_concat(COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),u.id), ', ')
+		FROM channel_recipients cr JOIN users u ON u.id=cr.user_id WHERE cr.channel_id=c.id)
+	END,
+	CASE WHEN c.guild_id IS NULL THEN
+		(SELECT COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),u.id)
+		FROM messages m JOIN users u ON u.id=m.author_id WHERE m.channel_id=c.id
+		ORDER BY m.sort_key DESC LIMIT 1)
+	END, c.id, '')`
+
 func (s *Store) Channels(ctx context.Context, guildID string) ([]model.ChannelRow, error) {
 	if guildID != "" && !model.ID(guildID) {
 		return nil, errors.New("invalid guild ID")
 	}
-	query := `SELECT id, COALESCE(guild_id,''), COALESCE(parent_id,''), COALESCE(name,''), COALESCE(kind,-1), deleted FROM channels WHERE guild_id IS NULL ORDER BY lower(COALESCE(name,id)), id`
+	query := `SELECT c.id, COALESCE(c.guild_id,''), COALESCE(c.parent_id,''), ` + channelDisplayNameSQL + ` AS display_name, COALESCE(c.kind,-1), c.deleted FROM channels c WHERE c.guild_id IS NULL ORDER BY lower(display_name), c.id`
 	args := []any{}
 	if guildID != "" {
-		query = `SELECT id, COALESCE(guild_id,''), COALESCE(parent_id,''), COALESCE(name,''), COALESCE(kind,-1), deleted FROM channels WHERE guild_id=? ORDER BY lower(COALESCE(name,id)), id`
+		query = `SELECT c.id, COALESCE(c.guild_id,''), COALESCE(c.parent_id,''), ` + channelDisplayNameSQL + ` AS display_name, COALESCE(c.kind,-1), c.deleted FROM channels c WHERE c.guild_id=? ORDER BY lower(display_name), c.id`
 		args = append(args, guildID)
 	}
 	rows, err := s.reader.QueryContext(ctx, query, args...)
@@ -337,76 +413,6 @@ func (s *Store) Channels(ctx context.Context, guildID string) ([]model.ChannelRo
 		result = append(result, item)
 	}
 	return result, rows.Err()
-}
-func (s *Store) Messages(ctx context.Context, f model.Filter) ([]model.MessageRow, error) {
-	if f.Limit < 1 || f.Limit > 100 {
-		f.Limit = 50
-	}
-	where := []string{"1=1"}
-	args := []any{}
-	if f.Query != "" {
-		where = append(where, "m.content LIKE ? ESCAPE '\\'")
-		v := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(f.Query)
-		args = append(args, "%"+v+"%")
-	}
-	if model.ID(f.ChannelID) {
-		where = append(where, "m.channel_id=?")
-		args = append(args, f.ChannelID)
-	}
-	if model.ID(f.GuildID) {
-		where = append(where, "c.guild_id=?")
-		args = append(args, f.GuildID)
-	} else if f.Scope == "dm" {
-		where = append(where, "c.guild_id IS NULL")
-	}
-	if model.ID(f.Before) {
-		where = append(where, "m.sort_key<?")
-		args = append(args, model.SortKey(f.Before))
-	}
-	args = append(args, f.Limit)
-	query := `SELECT m.id,COALESCE(m.channel_id,''),COALESCE(c.name,c.id,''),COALESCE(g.name,c.guild_id,''),COALESCE(u.display_name,u.username,u.id,''),COALESCE(m.content,''),COALESCE(m.created_at,''),COALESCE(m.edited_at,''),m.source,m.deleted,COALESCE((SELECT ru.hash FROM resource_urls ru WHERE ru.host='cdn.discordapp.com' AND substr(ru.path,1,length('/avatars/'||u.id||'/'||u.avatar||'.'))='/avatars/'||u.id||'/'||u.avatar||'.' LIMIT 1),'') FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN guilds g ON g.id=c.guild_id LEFT JOIN users u ON u.id=m.author_id WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.sort_key DESC LIMIT ?`
-	rows, e := s.reader.QueryContext(ctx, query, args...)
-	if e != nil {
-		return nil, e
-	}
-	result := []model.MessageRow{}
-	for rows.Next() {
-		var m model.MessageRow
-		if e = rows.Scan(&m.ID, &m.ChannelID, &m.ChannelName, &m.GuildName, &m.AuthorName, &m.Content, &m.Timestamp, &m.EditedTimestamp, &m.Source, &m.Deleted, &m.AvatarHash); e != nil {
-			rows.Close()
-			return nil, e
-		}
-		result = append(result, m)
-	}
-	e = rows.Err()
-	rows.Close()
-	if e != nil {
-		return nil, e
-	}
-	for i := range result {
-		a, e := s.reader.QueryContext(ctx, `SELECT a.name,COALESCE(r.hash,'') FROM attachments a LEFT JOIN resource_urls r ON r.host=a.host AND r.path=a.path WHERE a.message_id=? ORDER BY a.id`, result[i].ID)
-		if e != nil {
-			return nil, e
-		}
-		for a.Next() {
-			var item model.AssetRow
-			if e = a.Scan(&item.Name, &item.Hash); e != nil {
-				a.Close()
-				return nil, e
-			}
-			result[i].Attachments = append(result[i].Attachments, item)
-		}
-		e = a.Err()
-		a.Close()
-		if e != nil {
-			return nil, e
-		}
-		result[i].Reactions, e = s.messageReactions(ctx, result[i].ID)
-		if e != nil {
-			return nil, e
-		}
-	}
-	return result, nil
 }
 
 var ErrQuota = errors.New("resource cache quota reached")

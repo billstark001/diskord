@@ -84,11 +84,12 @@ func TestNavigationAndScopedMessages(t *testing.T) {
 	ctx := context.Background()
 	category := 4
 	batch := model.Batch{Source: "ws",
+		Users:  []model.User{{ID: "9", Username: model.Ptr("Alice")}},
 		Guilds: []model.Guild{{ID: "1", Name: model.Ptr("Server")}},
 		Channels: []model.Channel{
 			{ID: "2", GuildID: model.Ptr("1"), Name: model.Ptr("Category"), Type: &category},
 			{ID: "3", GuildID: model.Ptr("1"), ParentID: model.Ptr("2"), Name: model.Ptr("General")},
-			{ID: "4", Name: model.Ptr("DM")},
+			{ID: "4", Type: model.Ptr(1), Recipients: []string{"9"}},
 		},
 		Messages: []model.Message{
 			{ID: "10", ChannelID: model.Ptr("3"), Content: model.Ptr("server message")},
@@ -115,12 +116,34 @@ func TestNavigationAndScopedMessages(t *testing.T) {
 	if !found {
 		t.Fatalf("category relation lost: %+v", channels)
 	}
+	if err := s.Apply(ctx, model.Batch{Source: "ws", Channels: []model.Channel{
+		{ID: "3", Name: model.Ptr("___hidden___")},
+		{ID: "5", GuildID: model.Ptr("1"), Name: model.Ptr("___hidden___")},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Apply(ctx, model.Batch{Source: "http", Channels: []model.Channel{
+		{ID: "5", Name: model.Ptr("Resolved channel")},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	channels, err = s.Channels(ctx, "1")
+	if err != nil || len(channels) != 3 {
+		t.Fatalf("updated channels: %+v, %v", channels, err)
+	}
+	names := map[string]string{}
+	for _, item := range channels {
+		names[item.ID] = item.Name
+	}
+	if names["3"] != "General" || names["5"] != "Resolved channel" {
+		t.Fatalf("placeholder channel update: %+v", names)
+	}
 	dms, err := s.Channels(ctx, "")
-	if err != nil || len(dms) != 1 || dms[0].ID != "4" {
+	if err != nil || len(dms) != 1 || dms[0].ID != "4" || dms[0].Name != "Alice" {
 		t.Fatalf("dm channels: %+v, %v", dms, err)
 	}
 	rows, err := s.Messages(ctx, model.Filter{Scope: "dm"})
-	if err != nil || len(rows) != 1 || rows[0].ID != "11" {
+	if err != nil || len(rows) != 1 || rows[0].ID != "11" || rows[0].ChannelName != "Alice" {
 		t.Fatalf("dm messages: %+v, %v", rows, err)
 	}
 	rows, err = s.Messages(ctx, model.Filter{GuildID: "1", ChannelID: "3"})
@@ -240,7 +263,7 @@ func TestSchemaV1UpgradesToReactions(t *testing.T) {
 	}
 	defer s.Close()
 	var version int
-	if err := s.reader.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 2 {
+	if err := s.reader.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 3 {
 		t.Fatalf("migration version %d: %v", version, err)
 	}
 }
@@ -271,5 +294,82 @@ func TestCustomEmojiUsesCachedImage(t *testing.T) {
 	rows, err := s.Messages(ctx, model.Filter{})
 	if err != nil || len(rows) != 1 || len(rows[0].Reactions) != 1 || rows[0].Reactions[0].EmojiHash == "" {
 		t.Fatalf("emoji image: %+v, %v", rows, err)
+	}
+}
+
+func TestMessageCursorsAndCachedResourceAliases(t *testing.T) {
+	root := t.TempDir()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(key, os.Getenv(key))
+	}
+	if err := securefs.Prepare(root); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	batch := model.Batch{Source: "http", Guilds: []model.Guild{{ID: "1", Name: model.Ptr("Guild")}}}
+	for _, id := range []string{"1", "2", "3", "4", "5", "6"} {
+		batch.Messages = append(batch.Messages, model.Message{ID: id, Content: model.Ptr("message " + id)})
+	}
+	batch.Messages[3].Content = model.Ptr("hi <@9> <:wave:8>")
+	batch.Messages[3].HasAttachments = true
+	batch.Messages[3].Attachments = []model.Attachment{{ID: "20", MessageID: "4", Name: "image.png", Host: "cdn.discordapp.com", Path: "/attachments/1/20/image.png"}}
+	batch.Users = []model.User{{ID: "9", Username: model.Ptr("Alice")}}
+	if err := s.Apply(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ host, path, mime string }{
+		{"media.discordapp.net", "/attachments/1/20/image.png", "image/png"},
+		{"cdn.discordapp.com", "/emojis/8.webp", "image/webp"},
+		{"cdn.discordapp.com", "/icons/1/icon.webp", "image/webp"},
+	} {
+		if err := s.SaveAsset(ctx, item.host, item.path, item.mime, []byte(item.path), 1<<20); err != nil {
+			t.Fatal(err)
+		}
+	}
+	latest, err := s.ListBefore(ctx, model.Filter{Limit: 2})
+	if err != nil || len(latest.Rows) != 2 || latest.Rows[0].ID != "5" || latest.Rows[1].ID != "6" || latest.Before != "5" {
+		t.Fatalf("latest: %+v, %v", latest, err)
+	}
+	older, err := s.ListBefore(ctx, model.Filter{Before: latest.Before, Limit: 2})
+	if err != nil || len(older.Rows) != 2 || older.Rows[0].ID != "3" || older.Rows[1].ID != "4" || older.Before != "3" {
+		t.Fatalf("older: %+v, %v", older, err)
+	}
+	newer, err := s.ListAfter(ctx, model.Filter{After: "4", Limit: 2})
+	if err != nil || len(newer.Rows) != 2 || newer.Rows[0].ID != "5" || newer.Rows[1].ID != "6" || newer.After != "" {
+		t.Fatalf("newer: %+v, %v", newer, err)
+	}
+	filtered, err := s.ListBefore(ctx, model.Filter{Query: "message", Limit: 3})
+	if err != nil || len(filtered.Rows) != 3 || filtered.Rows[0].ID != "3" || filtered.Rows[2].ID != "6" || filtered.Before != "3" {
+		t.Fatalf("chronological search: %+v, %v", filtered, err)
+	}
+	around, err := s.ListAround(ctx, model.Filter{Around: "4", Limit: 4})
+	if err != nil || len(around.Rows) != 4 || around.Rows[0].ID != "3" || around.Rows[1].ID != "4" || around.Rows[3].ID != "6" || around.Before != "3" {
+		t.Fatalf("around: %+v, %v", around, err)
+	}
+	single, err := s.ListAround(ctx, model.Filter{Around: "4", Limit: 1})
+	if err != nil || len(single.Rows) != 1 || single.Rows[0].ID != "4" || single.Before != "4" || single.After != "4" {
+		t.Fatalf("single message context: %+v, %v", single, err)
+	}
+	message := older.Rows[1]
+	if len(message.Attachments) != 1 || message.Attachments[0].Hash == "" || message.EmojiHashes["8"] == "" || message.MentionNames["user:9"] != "Alice" {
+		t.Fatalf("enriched message: %+v", message)
+	}
+	guilds, err := s.Guilds(ctx)
+	if err != nil || len(guilds) != 1 || guilds[0].IconHash == "" {
+		t.Fatalf("cached guild icon: %+v, %v", guilds, err)
+	}
+	targets, err := s.MissingResources(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		if target.Path == "/attachments/1/20/image.png" || target.Path == "/emojis/8.png" {
+			t.Fatalf("cached variant retried: %+v", targets)
+		}
 	}
 }
