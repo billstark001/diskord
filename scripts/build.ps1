@@ -19,11 +19,12 @@ function Invoke-Go {
 }
 & node scripts/build-frontend.mjs
 if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+$appVersion = "v$((Get-Content frontend/package.json -Raw | ConvertFrom-Json).version)"
 Invoke-Go mod tidy
 Invoke-Go test ./...
 $env:CGO_ENABLED = "0"; $env:GOOS = $TargetOS; $env:GOARCH = $TargetArch
 $suffix = if ($TargetOS -eq "windows") { ".exe" } else { "" }
 $output = "dist/diskord-$TargetOS-$TargetArch$suffix"
-Invoke-Go build -trimpath '-ldflags=-s -w -buildid=' -o $output ./cmd/diskord
+Invoke-Go build -trimpath "-ldflags=-s -w -buildid= -X diskord/internal/version.Current=$appVersion" -o $output ./cmd/diskord
 Write-Output "Built: $output"
 Write-Output "The binary embeds the Preact console; pnpm is needed only when building from source."

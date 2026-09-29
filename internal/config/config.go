@@ -71,7 +71,7 @@ capture:
   max_http_bytes: 8388608
   max_event_bytes: 16777216
   queue: 128
-  raw: false # v0.1 rejects true: no raw traffic database exists.
+  raw: false # Raw traffic capture is unavailable: no raw database exists.
 resources:
   enabled: false
   max_bytes: 8388608
@@ -113,7 +113,7 @@ func (c Config) Validate() error {
 		return errors.New("proxy.max_connections must be 1..1024")
 	}
 	if c.Capture.Raw {
-		return errors.New("raw capture is deliberately unavailable in v0.1")
+		return errors.New("raw capture is deliberately unavailable")
 	}
 	if c.Capture.Queue < 1 || c.Capture.Queue > 2048 {
 		return errors.New("capture.queue must be 1..2048")

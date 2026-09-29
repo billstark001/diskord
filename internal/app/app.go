@@ -19,6 +19,7 @@ import (
 	"diskord/internal/securefs"
 	"diskord/internal/store"
 	"diskord/internal/ui"
+	"diskord/internal/version"
 )
 
 func Run(ctx context.Context, path string) error {
@@ -96,7 +97,7 @@ func Run(ctx context.Context, path string) error {
 	go func() { failures <- control.Serve() }()
 	go func() { failures <- front.Serve() }()
 	go func() { failures <- <-backend.Errors }()
-	log.Printf("diskord v0.1; runtime=%s proxy=http://%s ui=http://%s", m.Root, c.Proxy.Listen, c.Web.Listen)
+	log.Printf("diskord %s; runtime=%s proxy=http://%s ui=http://%s", version.Current, m.Root, c.Proxy.Listen, c.Web.Listen)
 	fmt.Println("Use 'diskord --config <yaml-path> ui-token' to retrieve the console token. Capture is passive; Ctrl+C stops the proxy.")
 	select {
 	case <-ctx.Done():

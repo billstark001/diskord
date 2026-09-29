@@ -14,10 +14,9 @@ import (
 	"diskord/internal/config"
 	"diskord/internal/securefs"
 	"diskord/internal/ui"
+	"diskord/internal/version"
 	"github.com/spf13/cobra"
 )
-
-const version = "0.1.0-prototype"
 
 func main() {
 	if err := newRootCommand().Execute(); err != nil {
@@ -29,7 +28,7 @@ func main() {
 func newRootCommand() *cobra.Command {
 	configPath := "diskord.yaml"
 	root := &cobra.Command{
-		Use: "diskord", Version: version,
+		Use: "diskord", Version: version.Current,
 		Short:         "Local, explicitly configured Discord traffic observer",
 		Long:          "Observe authorized local Discord traffic. Root CA trust and client proxy settings are always explicit.",
 		SilenceErrors: true, SilenceUsage: true,
@@ -176,7 +175,7 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(&cobra.Command{Use: "stop-bg", Short: "Stop the background diskord in the current working directory", Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error { return stopBackground(configPath) }})
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Print diskord version", Args: cobra.NoArgs,
-		Run: func(cmd *cobra.Command, _ []string) { cmd.Println(version) }})
+		Run: func(cmd *cobra.Command, _ []string) { cmd.Println(version.Current) }})
 	return root
 }
 

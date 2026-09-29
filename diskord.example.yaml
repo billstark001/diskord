@@ -14,7 +14,7 @@ capture:
   max_http_bytes: 8388608
   max_event_bytes: 16777216
   queue: 128
-  raw: false # v0.1 rejects true: no raw traffic database exists.
+  raw: false # Raw traffic capture is unavailable: no raw database exists.
 resources:
   enabled: false
   max_bytes: 8388608
