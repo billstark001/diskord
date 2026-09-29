@@ -45,15 +45,17 @@ func TestBackgroundRejectsConfigOutsideWorkingDirectory(t *testing.T) {
 }
 
 func TestDiscordBundleUsesLaunchServicesArguments(t *testing.T) {
-	binary := "/Applications/Discord.app/Contents/MacOS/Discord"
-	if got := discordAppBundle(binary); got != "/Applications/Discord.app" {
+	bundle := filepath.Join("Applications", "Discord.app")
+	binary := filepath.Join(bundle, "Contents", "MacOS", "Discord")
+	if got := discordAppBundle(binary); got != bundle {
 		t.Fatalf("bundle: %q", got)
 	}
-	if got := discordAppBundle("/usr/bin/discord"); got != "" {
+	if got := discordAppBundle(filepath.Join("usr", "bin", "discord")); got != "" {
 		t.Fatalf("non-bundle executable: %q", got)
 	}
-	args := discordOpenArgs("/Applications/Discord.app", "/tmp/discord.log", []string{"--proxy-server=http://127.0.0.1:3901", "--disable-quic"})
-	if strings.Join(args, "|") != "-a|/Applications/Discord.app|--stdin|"+os.DevNull+"|--stdout|/tmp/discord.log|--stderr|/tmp/discord.log|--args|--proxy-server=http://127.0.0.1:3901|--disable-quic" {
+	logPath := filepath.Join("tmp", "discord.log")
+	args := discordOpenArgs(bundle, logPath, []string{"--proxy-server=http://127.0.0.1:3901", "--disable-quic"})
+	if strings.Join(args, "|") != "-a|"+bundle+"|--stdin|"+os.DevNull+"|--stdout|"+logPath+"|--stderr|"+logPath+"|--args|--proxy-server=http://127.0.0.1:3901|--disable-quic" {
 		t.Fatalf("open arguments: %q", args)
 	}
 }

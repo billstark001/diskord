@@ -32,9 +32,7 @@ func TestWriterRotatesAndKeepsPrivateFiles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm()&0077 != 0 {
-			t.Fatalf("%s is not private: %s", name, info.Mode())
-		}
+		assertPrivateLog(t, name, info.Mode())
 	}
 	if _, err := os.Stat(base + ".4"); !os.IsNotExist(err) {
 		t.Fatalf("unexpected extra backup: %v", err)
