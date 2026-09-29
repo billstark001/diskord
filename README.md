@@ -1,6 +1,6 @@
 # diskord · Local Discord Message Observation Proxy
 
-Go 1.27 / go-mitmproxy / Preact + TypeScript + Vite / SQLite, v0.1 prototype. The console uses signals, TanStack Query, vanilla-extract styles, and a small built-in Chinese/English dictionary. The repository includes pinned Go and pnpm dependency checksums and the built frontend assets embedded into the Go binary. The local `dist/` directory holds only built binaries. See `TEST_REPORT.md` for build and automated test results; integration with the Discord desktop client still needs to be tested on each target machine.
+Go 1.27 / go-mitmproxy / Preact + TypeScript + Vite / SQLite. The console uses signals, TanStack Query, vanilla-extract styles, and a small built-in Chinese/English dictionary. The repository includes pinned Go and pnpm dependency checksums and the built frontend assets embedded into the Go binary. The local `dist/` directory holds only built binaries; integration with the Discord desktop client still needs to be tested on each target machine.
 
 Observe only local traffic from your own devices and accounts, or traffic for which you have explicit authorization. The application does not automatically install a root certificate, change the system proxy, request Discord history, read browser account databases, or extract or replay authentication credentials.
 
@@ -61,6 +61,8 @@ The build scripts install from the pinned pnpm lockfile, typecheck and compile t
 Prebuilt binaries in `dist/` are unsigned and not notarized. On a fresh checkout, build the frontend first with `node scripts/build-frontend.mjs` before running `go build ./cmd/diskord`, or use the project build script. Go modules are not vendored; an offline rebuild still requires a populated module cache. The target system trust chain and the behavior of Chrome and the Discord desktop application must be tested using `docs/ACCEPTANCE.md`.
 
 ## GitHub releases
+
+See [the release procedure](docs/RELEASING.md) and [changelog](CHANGELOG.md) before creating a tag.
 
 Ordinary commits and PRs run builds, linting, and tests. After a `vX.Y.Z` tag is pushed, CI waits for validation and all four platform builds to pass, then creates a GitHub Release with four separate binaries. [GitHub automatically provides](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases) standard **Source code (zip)** and **Source code (tar.gz)** archives for the tag; the project does not make another local source ZIP. Hyphenated prerelease tags are marked as prereleases.
 
