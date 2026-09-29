@@ -85,6 +85,10 @@ func (e *Engine) fetchMissing(client *http.Client, target store.ResourceTarget) 
 	if err != nil {
 		return err
 	}
+	// Discord's CDN rejects Go's default User-Agent for otherwise public
+	// guild icons and emoji URLs. No authorization headers or signed queries
+	// are sent during backfill.
+	req.Header.Set("User-Agent", "Mozilla/5.0")
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

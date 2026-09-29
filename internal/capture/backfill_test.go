@@ -44,7 +44,7 @@ func TestBackfillFetchesOnlyObservedCDNPath(t *testing.T) {
 	engine := New(s, func() config.Config { return cfg })
 	defer engine.Close()
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Scheme != "https" || req.URL.Host != "cdn.discordapp.com" || req.URL.EscapedPath() != path || req.URL.RawQuery != "" || req.Header.Get("Authorization") != "" {
+		if req.URL.Scheme != "https" || req.URL.Host != "cdn.discordapp.com" || req.URL.EscapedPath() != path || req.URL.RawQuery != "" || req.Header.Get("Authorization") != "" || req.Header.Get("User-Agent") != "Mozilla/5.0" {
 			t.Fatalf("unsafe backfill request: %s", req.URL)
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: io.NopCloser(strings.NewReader("image"))}, nil
