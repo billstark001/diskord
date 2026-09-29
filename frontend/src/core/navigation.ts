@@ -16,6 +16,7 @@ export const guild = signal(initial.searchParams.get("guild") || "");
 export const channel = signal(initial.searchParams.get("channel") || "");
 export const scope = signal(initial.searchParams.get("scope") === "dm" ? "dm" : "");
 export const query = signal(initial.searchParams.get("q") || "");
+export const around = signal(initial.searchParams.get("around") || "");
 
 export function syncFromURL() {
   const url = new URL(location.href);
@@ -30,6 +31,7 @@ export function syncFromURL() {
     channel.value = url.searchParams.get("channel") || "";
     scope.value = url.searchParams.get("scope") === "dm" ? "dm" : "";
     query.value = url.searchParams.get("q") || "";
+    around.value = url.searchParams.get("around") || "";
   });
 }
 export function navigate(next: {
@@ -38,12 +40,14 @@ export function navigate(next: {
   channel?: string;
   scope?: string;
   q?: string;
+  around?: string;
 }) {
   const targetPage = next.page ?? page.value;
   const targetGuild = next.guild ?? guild.value;
   const targetChannel = next.channel ?? channel.value;
   const targetScope = next.scope ?? scope.value;
   const targetQuery = next.q ?? query.value;
+  const targetAround = next.around ?? around.value;
   const search =
     targetPage === "messages"
       ? params({
@@ -51,6 +55,7 @@ export function navigate(next: {
           channel: targetChannel,
           scope: targetGuild ? "" : targetScope,
           q: targetQuery,
+          around: targetAround,
         })
       : "";
   const path = targetPage === "overview" ? "/" : `/${targetPage}`;
@@ -61,6 +66,7 @@ export function navigate(next: {
     channel.value = targetChannel;
     scope.value = targetScope;
     query.value = targetQuery;
+    around.value = targetAround;
   });
 }
 export function guildName(item: Guild) {
@@ -70,5 +76,12 @@ export function channelName(item: Channel) {
   return item.Name || `${text("unknownChannel")} ${item.ID}`;
 }
 export function initials(value: string) {
-  return [...value][0]?.toLocaleUpperCase() || "?";
+  const words = value.trim().split(/\s+/u).filter(Boolean);
+  if (words.length > 1)
+    return words
+      .slice(0, 2)
+      .map((word) => [...word][0])
+      .join("")
+      .toLocaleUpperCase();
+  return [...(words[0] || "?")].slice(0, 2).join("").toLocaleUpperCase();
 }

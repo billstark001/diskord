@@ -16,11 +16,13 @@ type Props = {
 
 function groupedChannels(channels: Channel[]) {
   const categories = channels.filter((item) => item.Kind === 4);
-  const categoryIDs = new Set(categories.map((item) => item.ID));
-  const roots = channels.filter((item) => item.Kind !== 4 && !categoryIDs.has(item.ParentID));
+  const ids = new Set(channels.map((item) => item.ID));
+  const roots = channels.filter(
+    (item) => item.Kind !== 4 && (!item.ParentID || !ids.has(item.ParentID)),
+  );
   const children = new Map<string, Channel[]>();
   for (const item of channels) {
-    if (item.Kind === 4 || !categoryIDs.has(item.ParentID)) continue;
+    if (item.Kind === 4 || !item.ParentID || !ids.has(item.ParentID)) continue;
     const entries = children.get(item.ParentID) || [];
     entries.push(item);
     children.set(item.ParentID, entries);
@@ -40,18 +42,35 @@ export function ChannelSidebar({
   const selectedGuild = navigation?.guilds.find((item) => item.ID === guild);
   const { categories, roots, children } = groupedChannels(navigation?.channels || []);
   const header = guild
-    ? guildName(selectedGuild || { ID: guild, Name: "", Unavailable: false, Deleted: false })
+    ? guildName(
+        selectedGuild || { ID: guild, Name: "", IconHash: "", Unavailable: false, Deleted: false },
+      )
     : scope === "dm"
       ? text("dm")
       : text("servers");
-  const channelButton = (item: Channel) => (
-    <ChannelButton
-      key={item.ID}
-      item={item}
-      active={page === "messages" && channel === item.ID}
-      onClick={() => onSelect(item.ID)}
-    />
-  );
+  const channelBranch = (item: Channel, depth = 0, ancestors = new Set<string>()) => {
+    if (ancestors.has(item.ID)) return null;
+    const next = new Set(ancestors);
+    next.add(item.ID);
+    return (
+      <div key={item.ID}>
+        <ChannelButton
+          item={item}
+          depth={depth}
+          active={channel === item.ID}
+          onClick={() => onSelect(item.ID)}
+        />
+        {children.get(item.ID)?.map((child) => channelBranch(child, depth + 1, next))}
+      </div>
+    );
+  };
+  if (page !== "messages") {
+    return (
+      <aside class={s.sidebar} aria-label={text("channels")}>
+        <div class={s.sidebarHeader}>{text(page)}</div>
+      </aside>
+    );
+  }
   return (
     <aside class={s.sidebar} aria-label={text("channels")}>
       <div class={s.sidebarHeader}>{header}</div>
@@ -70,10 +89,10 @@ export function ChannelSidebar({
                   {channelName(category)}
                   {category.Deleted ? ` · ${text("deleted")}` : ""}
                 </div>
-                {children.get(category.ID)?.map(channelButton)}
+                {children.get(category.ID)?.map((item) => channelBranch(item))}
               </div>
             ))}
-            {roots.map(channelButton)}
+            {roots.map((item) => channelBranch(item))}
             {!loading && !navigation?.channels.length && (
               <p class={s.muted}>{text("noChannels")}</p>
             )}

@@ -9,6 +9,7 @@ import {
   channel,
   scope,
   query,
+  around,
   navigate,
   guildName,
   channelName,
@@ -28,15 +29,28 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
     currentGuild = guild.value,
     currentChannel = channel.value,
     currentScope = scope.value,
-    currentQuery = query.value;
-  const nav = useQuery({
-    queryKey: ["navigation", currentGuild, currentScope],
+    currentQuery = query.value,
+    currentAround = around.value;
+  const guilds = useQuery({
+    queryKey: ["guilds"],
+    queryFn: () => api<Navigation>("/api/navigation"),
+    staleTime: 10000,
+    refetchInterval: 10000,
+  });
+  const channels = useQuery({
+    queryKey: ["channels", currentGuild, currentScope],
     queryFn: () =>
       api<Navigation>(`/api/navigation?${params({ guild: currentGuild, scope: currentScope })}`),
+    enabled: currentPage === "messages" && !!(currentGuild || currentScope === "dm"),
     staleTime: 10000,
+    refetchInterval: 10000,
   });
-  const selectedGuild = nav.data?.guilds.find((item) => item.ID === currentGuild);
-  const selectedChannel = nav.data?.channels.find((item) => item.ID === currentChannel);
+  const navigation: Navigation = {
+    guilds: guilds.data?.guilds || [],
+    channels: channels.data?.channels || [],
+  };
+  const selectedGuild = navigation.guilds.find((item) => item.ID === currentGuild);
+  const selectedChannel = navigation.channels.find((item) => item.ID === currentChannel);
   const title =
     currentPage === "overview"
       ? text("overview")
@@ -46,36 +60,40 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
           ? `# ${channelName(selectedChannel)}`
           : currentGuild
             ? guildName(
-                selectedGuild || { ID: currentGuild, Name: "", Unavailable: false, Deleted: false },
+                selectedGuild || {
+                  ID: currentGuild,
+                  Name: "",
+                  IconHash: "",
+                  Unavailable: false,
+                  Deleted: false,
+                },
               )
             : currentScope === "dm"
               ? text("dm")
               : text("all");
   function select(next: { guild: string; channel: string; scope: string }) {
-    navigate({ page: "messages", ...next, q: "" });
+    navigate({ page: "messages", ...next, q: "", around: "" });
   }
   async function logout() {
     await api("/api/logout", { method: "POST", body: "{}" }, csrf);
     onLogout();
   }
-  const scrollKey = `${currentPage}:${currentGuild}:${currentChannel}:${currentScope}:${currentQuery}`;
-  const scrollPositions = useRef(new Map<string, number>());
   useLayoutEffect(() => {
-    scroll.current?.scrollTo({ top: scrollPositions.current.get(scrollKey) || 0 });
-  }, [scrollKey]);
+    scroll.current?.scrollTo({ top: 0 });
+  }, [currentPage]);
   return (
     <div class={s.shell}>
       <ServerRail
-        guilds={nav.data?.guilds || []}
+        guilds={navigation.guilds}
         page={currentPage}
         guild={currentGuild}
         scope={currentScope}
-        onPage={(page) => navigate({ page })}
+        onPage={(page) => navigate({ page, around: "" })}
         onSelect={(guild, scope) => select({ guild, channel: "", scope })}
       />
       <ChannelSidebar
-        navigation={nav.data}
-        loading={nav.isLoading}
+        navigation={navigation}
+        loading={guilds.isLoading || channels.isLoading}
         page={currentPage}
         guild={currentGuild}
         channel={currentChannel}
@@ -92,11 +110,8 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
           </button>
         </header>
         <section
-          class={s.content}
+          class={`${s.content} ${currentPage === "messages" ? s.archiveContent : ""}`}
           ref={scroll}
-          onScroll={(event) =>
-            scrollPositions.current.set(scrollKey, event.currentTarget.scrollTop)
-          }
         >
           {currentPage === "overview" ? (
             <OverviewPage />
@@ -108,9 +123,20 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
               channel={currentChannel}
               scope={currentScope}
               query={currentQuery}
+              around={currentAround}
               onSearch={(q) => {
-                navigate({ q });
+                navigate({ q, around: "" });
               }}
+              onJump={(message) =>
+                navigate({
+                  page: "messages",
+                  guild: message.GuildID,
+                  channel: message.ChannelID,
+                  scope: message.GuildID ? "" : "dm",
+                  q: "",
+                  around: message.ID,
+                })
+              }
               onRefresh={() => void client.invalidateQueries({ queryKey: ["messages"] })}
             />
           )}

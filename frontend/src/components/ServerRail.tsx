@@ -1,3 +1,4 @@
+import { useEffect, useState } from "preact/hooks";
 import type { Guild } from "../core/api";
 import { text } from "../core/i18n";
 import { guildName, initials } from "../core/navigation";
@@ -11,6 +12,24 @@ type Props = {
   onPage: (page: "overview" | "settings") => void;
   onSelect: (guild: string, scope: string) => void;
 };
+
+function GuildBadge({ item }: { item: Guild }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [item.IconHash]);
+  return item.IconHash && !failed ? (
+    <img
+      class={s.railIcon}
+      src={`/assets/${item.IconHash}`}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  ) : (
+    <span class={s.railFallback} aria-hidden="true">
+      {initials(guildName(item))}
+    </span>
+  );
+}
 
 export function ServerRail({ guilds, page, guild, scope, onPage, onSelect }: Props) {
   return (
@@ -44,7 +63,7 @@ export function ServerRail({ guilds, page, guild, scope, onPage, onSelect }: Pro
           title={`${guildName(item)}${item.Deleted ? ` · ${text("deleted")}` : item.Unavailable ? ` · ${text("unavailable")}` : ""}`}
           onClick={() => onSelect(item.ID, "")}
         >
-          {initials(guildName(item))}
+          <GuildBadge item={item} />
         </button>
       ))}
       <div class={s.spacer} />

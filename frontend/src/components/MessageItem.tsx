@@ -1,10 +1,29 @@
 import type { Message } from "../core/api";
 import { text } from "../core/i18n";
 import { s } from "../styles";
+import { RichContent } from "./RichContent";
 
-export function MessageItem({ message }: { message: Message }) {
+export function MessageItem({
+  message,
+  onJump,
+  focused,
+}: {
+  message: Message;
+  onJump?: () => void;
+  focused?: boolean;
+}) {
   return (
-    <article class={s.message}>
+    <article
+      class={`${s.message} ${focused ? s.messageFocused : ""} ${onJump ? s.messageJumpable : ""}`}
+      data-message-id={message.ID}
+      onDblClick={onJump}
+      onKeyDown={(event) => {
+        if (onJump && event.key === "Enter") onJump();
+      }}
+      tabIndex={onJump ? 0 : undefined}
+      role={onJump ? "button" : undefined}
+      title={onJump ? text("jumpToMessage") : undefined}
+    >
       {message.AvatarHash ? (
         <img class={s.avatar} src={`/assets/${message.AvatarHash}`} alt="" loading="lazy" />
       ) : (
@@ -21,7 +40,9 @@ export function MessageItem({ message }: { message: Message }) {
           </span>
           <span class={s.messageMeta}>{message.Timestamp}</span>
         </div>
-        <div class={s.messageBody}>{message.Content}</div>
+        <div class={s.messageBody}>
+          <RichContent message={message} />
+        </div>
         {message.Deleted && <span class={s.badge}>{text("deleted")}</span>}
         {message.EditedTimestamp && (
           <span class={s.messageMeta}>

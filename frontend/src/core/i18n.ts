@@ -25,6 +25,9 @@ export const strings = {
   clear: ["清除", "Clear"],
   refresh: ["刷新", "Refresh"],
   older: ["加载更早消息", "Load older messages"],
+  newer: ["加载更新消息", "Load newer messages"],
+  jumpToMessage: ["双击跳转到原消息", "Double-click to jump to the original message"],
+  thread: ["帖子", "Thread"],
   loading: ["加载中…", "Loading…"],
   noMessages: [
     "没有匹配的消息。这里只显示本机已观察到的内容。",

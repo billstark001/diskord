@@ -1,6 +1,12 @@
 export type Locale = "zh-CN" | "en";
 export type Session = { authenticated: boolean; csrf: string; locale: Locale };
-export type Guild = { ID: string; Name: string; Unavailable: boolean; Deleted: boolean };
+export type Guild = {
+  ID: string;
+  Name: string;
+  IconHash: string;
+  Unavailable: boolean;
+  Deleted: boolean;
+};
 export type Channel = {
   ID: string;
   GuildID: string;
@@ -13,6 +19,7 @@ export type Message = {
   ID: string;
   ChannelID: string;
   ChannelName: string;
+  GuildID: string;
   GuildName: string;
   AuthorName: string;
   AvatarHash: string;
@@ -31,9 +38,11 @@ export type Message = {
     UnknownCount: number;
     Users: string[];
   }[];
+  MentionNames: Record<string, string>;
+  EmojiHashes: Record<string, string>;
 };
 export type Navigation = { guilds: Guild[]; channels: Channel[] };
-export type Messages = { rows: Message[]; next: string };
+export type Messages = { rows: Message[]; before: string; after: string };
 export type Counts = { Users: number; Guilds: number; Channels: number; Messages: number };
 export type Stats = {
   ActiveGateway: number;

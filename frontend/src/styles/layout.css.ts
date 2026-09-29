@@ -26,6 +26,7 @@ export const layout = {
     display: "grid",
     placeItems: "center",
     border: 0,
+    padding: 0,
     borderRadius: 15,
     background: vars.color.raised,
     color: vars.color.ink,
@@ -36,6 +37,8 @@ export const layout = {
     "@media": { "(max-width: 760px)": { width: 42, height: 42 } },
   }),
   railSelected: style({ borderRadius: 12, background: vars.color.accentStrong }),
+  railIcon: style({ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }),
+  railFallback: style({ fontSize: 13, letterSpacing: "-0.04em", lineHeight: 1, maxWidth: "100%" }),
   railDivider: style({ height: 1, width: 32, background: vars.color.line, margin: "5px 0" }),
   sidebar: style({
     minHeight: 0,
@@ -110,12 +113,19 @@ export const layout = {
   }),
   spacer: style({ flex: 1 }),
   content: style({
+    flex: 1,
     minHeight: 0,
     overflowY: "auto",
     overflowX: "hidden",
     padding: "22px clamp(16px, 4vw, 48px)",
     scrollbarGutter: "stable",
     "@media": { "(max-width: 760px)": { padding: "16px 12px" } },
+  }),
+  archiveContent: style({
+    padding: 0,
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
   }),
   narrowContent: style({ width: "min(100%, 940px)", margin: "0 auto" }),
   footer: style({
