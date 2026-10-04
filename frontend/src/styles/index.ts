@@ -3,5 +3,6 @@ import { layout } from "./layout.css";
 import { common } from "./common.css";
 import { archive } from "./archive.css";
 import { forms } from "./forms.css";
+import { forum } from "./forum.css";
 
-export const s = { ...layout, ...common, ...archive, ...forms };
+export const s = { ...layout, ...common, ...archive, ...forms, ...forum };

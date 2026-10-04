@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import type { Settings } from "../core/api";
 import { text } from "../core/i18n";
+import { formatLocalTime } from "../core/time";
 import { s } from "../styles";
 
 export function ResourceCard({
@@ -37,7 +38,7 @@ export function CertificateCard({ settings }: { settings: Settings }) {
           ["certPath", settings.cert],
           ["keyPath", settings.key],
           ["fingerprint", settings.fingerprint],
-          ["expires", settings.expires],
+          ["expires", formatLocalTime(settings.expires)],
         ] as const
       ).map(([label, value]) => (
         <div class={s.field} key={label}>

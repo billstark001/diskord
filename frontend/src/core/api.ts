@@ -13,13 +13,39 @@ export type Channel = {
   ParentID: string;
   Name: string;
   Kind: number;
+  Position: number | null;
   Deleted: boolean;
+};
+export type ForumPost = {
+  ID: string;
+  Name: string;
+  AuthorName: string;
+  Content: string;
+  CreatedAt: string;
+  LastActivity: string;
+  LastActivityID: string;
+  ReplyCount: number;
+  Archived: boolean;
+  Pinned: boolean;
+  Deleted: boolean;
+  Tags: string[];
+  Attachment: { Name: string; Hash: string };
+  Reactions: Message["Reactions"];
+};
+export type Forum = {
+  ID: string;
+  Name: string;
+  Topic: string;
+  DefaultSortOrder: number | null;
+  DefaultForumLayout: number | null;
+  Posts: ForumPost[];
 };
 export type Message = {
   ID: string;
   ChannelID: string;
   ChannelName: string;
   GuildID: string;
+  ChannelKind: number;
   GuildName: string;
   AuthorName: string;
   AvatarHash: string;
@@ -59,6 +85,8 @@ export type Stats = {
   AssetSkipped: number;
 };
 export type Overview = {
+  version: string;
+  schemaVersion: number;
   counts: Counts;
   stats: Stats;
   proxy: string;

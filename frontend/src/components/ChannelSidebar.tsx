@@ -15,14 +15,28 @@ type Props = {
 };
 
 function groupedChannels(channels: Channel[]) {
-  const categories = channels.filter((item) => item.Kind === 4);
+  const ordered = [...channels].sort((a, b) => {
+    if (a.Position == null || b.Position == null) {
+      if (a.Position == null && b.Position != null) return 1;
+      if (a.Position != null && b.Position == null) return -1;
+    }
+    return (
+      (a.Position ?? 0) - (b.Position ?? 0) ||
+      a.ID.length - b.ID.length ||
+      (a.ID < b.ID ? -1 : a.ID === b.ID ? 0 : 1)
+    );
+  });
+  const categories = ordered.filter((item) => item.Kind === 4);
   const ids = new Set(channels.map((item) => item.ID));
-  const roots = channels.filter(
+  const roots = ordered.filter(
     (item) => item.Kind !== 4 && (!item.ParentID || !ids.has(item.ParentID)),
   );
   const children = new Map<string, Channel[]>();
-  for (const item of channels) {
+  const kinds = new Map(channels.map((item) => [item.ID, item.Kind]));
+  for (const item of ordered) {
     if (item.Kind === 4 || !item.ParentID || !ids.has(item.ParentID)) continue;
+    if ((kinds.get(item.ParentID) === 15 || kinds.get(item.ParentID) === 16) && item.Kind === 11)
+      continue;
     const entries = children.get(item.ParentID) || [];
     entries.push(item);
     children.set(item.ParentID, entries);
@@ -83,6 +97,7 @@ export function ChannelSidebar({
         </button>
         {guild || scope === "dm" ? (
           <>
+            {roots.map((item) => channelBranch(item))}
             {categories.map((category) => (
               <div key={category.ID}>
                 <div class={s.category}>
@@ -92,7 +107,6 @@ export function ChannelSidebar({
                 {children.get(category.ID)?.map((item) => channelBranch(item))}
               </div>
             ))}
-            {roots.map((item) => channelBranch(item))}
             {!loading && !navigation?.channels.length && (
               <p class={s.muted}>{text("noChannels")}</p>
             )}

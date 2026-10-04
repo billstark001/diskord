@@ -12,10 +12,12 @@
   "dependencies": {
     "@preact/signals": "^2.9.0",
     "@tanstack/preact-query": "^5.101.4",
+    "markdown-it": "^15.0.2",
     "preact": "^10.29.1"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.19.0",
     "@vanilla-extract/css": "^1.21.2",
     "@vanilla-extract/vite-plugin": "^5.2.6",

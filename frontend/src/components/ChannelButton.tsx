@@ -15,6 +15,7 @@ export function ChannelButton({
   onClick: () => void;
 }) {
   const thread = item.Kind === 10 || item.Kind === 11 || item.Kind === 12;
+  const forum = item.Kind === 15 || item.Kind === 16;
   return (
     <button
       class={`${s.sidebarItem} ${active ? s.sidebarSelected : ""}`}
@@ -22,7 +23,7 @@ export function ChannelButton({
       style={{ paddingLeft: `${12 + depth * 16}px` }}
       onClick={onClick}
     >
-      {thread ? "↳" : "#"} &nbsp;{channelName(item)}
+      {thread ? "↳" : forum ? "▣" : "#"} &nbsp;{channelName(item)}
       {item.Deleted ? ` · ${text("deleted")}` : ""}
     </button>
   );

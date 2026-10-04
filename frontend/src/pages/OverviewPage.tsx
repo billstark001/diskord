@@ -67,6 +67,12 @@ export function OverviewPage() {
       </div>
       <div class={s.card}>
         <div>
+          {text("version")}: <code class={s.mono}>{result.data.version}</code>
+        </div>
+        <div>
+          {text("databaseSchema")}: <code class={s.mono}>{result.data.schemaVersion}</code>
+        </div>
+        <div>
           {text("proxy")}: <code class={s.mono}>{result.data.proxy}</code>
         </div>
         <div>

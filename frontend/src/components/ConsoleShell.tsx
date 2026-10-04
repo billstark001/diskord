@@ -18,6 +18,7 @@ import { LanguageSelect } from "./LanguageSelect";
 import { ServerRail } from "./ServerRail";
 import { ChannelSidebar } from "./ChannelSidebar";
 import { ArchivePage } from "../pages/ArchivePage";
+import { ForumPage } from "../pages/ForumPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { s } from "../styles";
@@ -117,6 +118,11 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
             <OverviewPage />
           ) : currentPage === "settings" ? (
             <SettingsPage csrf={csrf} />
+          ) : selectedChannel?.Kind === 15 || selectedChannel?.Kind === 16 ? (
+            <ForumPage
+              channel={selectedChannel.ID}
+              onOpen={(id) => select({ guild: currentGuild, channel: id, scope: "" })}
+            />
           ) : (
             <ArchivePage
               guild={currentGuild}
@@ -132,7 +138,7 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
                   page: "messages",
                   guild: message.GuildID,
                   channel: message.ChannelID,
-                  scope: message.GuildID ? "" : "dm",
+                  scope: message.ChannelKind === 1 || message.ChannelKind === 3 ? "dm" : "",
                   q: "",
                   around: message.ID,
                 })

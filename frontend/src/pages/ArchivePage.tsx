@@ -165,7 +165,7 @@ export function ArchivePage({
               key={message.ID}
               message={message}
               focused={message.ID === around}
-              onJump={submitted ? () => onJump(message) : undefined}
+              onJump={submitted || !channelID ? () => onJump(message) : undefined}
             />
           ))}
           {pages.isFetchingNextPage && <p class={s.muted}>{text("loading")}</p>}

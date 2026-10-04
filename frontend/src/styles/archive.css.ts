@@ -1,10 +1,11 @@
-import { style } from "@vanilla-extract/css";
+import { globalStyle, style } from "@vanilla-extract/css";
 import { vars } from "./theme.css";
 
 export const archive = {
   message: style({
+    position: "relative",
     borderBottom: `1px solid ${vars.color.line}`,
-    padding: "15px 8px",
+    padding: "15px 84px 15px 8px",
     display: "flex",
     flexShrink: 0,
     alignItems: "flex-start",
@@ -14,6 +15,45 @@ export const archive = {
   }),
   messageFocused: style({ background: "#293450", borderLeft: `3px solid ${vars.color.accent}` }),
   messageJumpable: style({ cursor: "pointer" }),
+  messageActions: style({
+    position: "absolute",
+    top: 5,
+    right: 7,
+    display: "flex",
+    alignItems: "center",
+    gap: 3,
+    opacity: 0,
+    pointerEvents: "none",
+    background: vars.color.surface,
+    border: `1px solid ${vars.color.line}`,
+    borderRadius: 7,
+    padding: 2,
+    zIndex: 1,
+  }),
+  messageAction: style({
+    display: "grid",
+    placeItems: "center",
+    width: 27,
+    height: 26,
+    border: 0,
+    borderRadius: 5,
+    background: "transparent",
+    color: vars.color.ink,
+    ":hover": { background: vars.color.raised },
+    ":disabled": { opacity: 0.45, cursor: "not-allowed" },
+  }),
+  copyStatus: style({
+    position: "absolute",
+    right: 0,
+    bottom: "calc(100% + 4px)",
+    whiteSpace: "nowrap",
+    color: vars.color.ink,
+    background: vars.color.surface,
+    borderRadius: 4,
+    fontSize: 11,
+    padding: "2px 5px",
+    ":empty": { display: "none" },
+  }),
   messageContent: style({ flex: 1, minWidth: 0 }),
   avatar: style({ width: 38, height: 38, flexShrink: 0, borderRadius: "50%", objectFit: "cover" }),
   avatarFallback: style({
@@ -44,7 +84,8 @@ export const archive = {
   }),
   messageAuthor: style({ fontWeight: 760, color: vars.color.ink }),
   messageMeta: style({ color: vars.color.muted, fontSize: 11 }),
-  messageBody: style({ whiteSpace: "pre-wrap", lineHeight: 1.58, color: "#e4e6ec" }),
+  messageBody: style({ lineHeight: 1.58, color: "#e4e6ec", minWidth: 0, overflowWrap: "anywhere" }),
+  richContent: style({ minWidth: 0 }),
   mention: style({ color: "#b9c9ff", background: "#343f63", borderRadius: 4, padding: "1px 3px" }),
   inlineEmoji: style({ width: 24, height: 24, objectFit: "contain", verticalAlign: "middle" }),
   emojiFallback: style({ color: vars.color.muted }),
@@ -110,3 +151,41 @@ export const archive = {
   }),
   statValue: style({ display: "block", fontSize: 30, fontWeight: 780, marginTop: 5 }),
 };
+
+globalStyle(
+  `${archive.message}:hover ${archive.messageActions}, ${archive.message}:focus-within ${archive.messageActions}`,
+  {
+    opacity: 1,
+    pointerEvents: "auto",
+  },
+);
+globalStyle(`${archive.messageActions}:focus-within`, { opacity: 1, pointerEvents: "auto" });
+globalStyle(`${archive.messageActions}`, {
+  "@media": { "(hover: none)": { opacity: 1, pointerEvents: "auto" } },
+});
+
+globalStyle(`${archive.richContent} p`, { margin: "0 0 6px" });
+globalStyle(`${archive.richContent} p:last-child`, { marginBottom: 0 });
+globalStyle(`${archive.richContent} pre`, {
+  overflowX: "auto",
+  padding: 12,
+  borderRadius: 8,
+  background: vars.color.rail,
+});
+globalStyle(`${archive.richContent} code`, {
+  fontFamily: "ui-monospace, SFMono-Regular, monospace",
+  background: vars.color.rail,
+  borderRadius: 4,
+  padding: "1px 3px",
+});
+globalStyle(`${archive.richContent} pre code`, { background: "transparent", padding: 0 });
+globalStyle(`${archive.richContent} blockquote`, {
+  margin: "7px 0",
+  paddingLeft: 12,
+  borderLeft: `3px solid ${vars.color.line}`,
+});
+globalStyle(`${archive.richContent} ul, ${archive.richContent} ol`, {
+  margin: "6px 0",
+  paddingLeft: 22,
+});
+globalStyle(`${archive.richContent} a`, { color: vars.color.accent, textDecoration: "underline" });

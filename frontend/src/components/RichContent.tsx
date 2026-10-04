@@ -1,4 +1,4 @@
-import type { ComponentChildren } from "preact";
+import MarkdownIt from "markdown-it";
 import type { Message } from "../core/api";
 import { emojiForShortcode } from "../core/emoji";
 import { s } from "../styles";
@@ -6,70 +6,47 @@ import { s } from "../styles";
 const markup =
   /<@!?(\d+)>|<@&(\d+)>|<#(\d+)>|<(a?):([A-Za-z0-9_]+):(\d+)>|(@everyone|@here)|:([A-Za-z0-9_+\-]{2,64}):/g;
 
-export function RichContent({ message }: { message: Message }) {
-  const parts: ComponentChildren[] = [];
+const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true });
+// Archived messages never fetch remote images merely because a message used
+// Markdown image syntax. Cached Discord attachments remain separate below.
+markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(tokens[index].content);
+markdown.renderer.rules.text = (tokens, index, _options, context) => {
+  const env = context as Message;
+  const value = tokens[index].content;
+  const parts: string[] = [];
   let start = 0;
-  for (const match of message.Content.matchAll(markup)) {
-    const index = match.index;
-    if (index > start) parts.push(message.Content.slice(start, index));
+  for (const match of value.matchAll(markup)) {
+    const offset = match.index;
+    if (offset > start) parts.push(markdown.utils.escapeHtml(value.slice(start, offset)));
     const [, user, role, channel, , emojiName, emojiID, broadcast, shortcode] = match;
-    const key = `${index}-${match[0]}`;
-    if (user) {
-      parts.push(
-        <span key={key} class={s.mention}>
-          @{message.MentionNames?.[`user:${user}`] || user}
-        </span>,
-      );
-    } else if (role) {
-      parts.push(
-        <span key={key} class={s.mention}>
-          @{message.MentionNames?.[`role:${role}`] || `role ${role}`}
-        </span>,
-      );
-    } else if (channel) {
-      parts.push(
-        <span key={key} class={s.mention}>
-          #{message.MentionNames?.[`channel:${channel}`] || channel}
-        </span>,
-      );
+    if (user || role || channel || broadcast) {
+      const label = user
+        ? `@${env.MentionNames?.[`user:${user}`] || user}`
+        : role
+          ? `@${env.MentionNames?.[`role:${role}`] || `role ${role}`}`
+          : channel
+            ? `#${env.MentionNames?.[`channel:${channel}`] || channel}`
+            : broadcast;
+      parts.push(`<span class="${s.mention}">${markdown.utils.escapeHtml(label)}</span>`);
     } else if (emojiID) {
-      const hash = message.EmojiHashes?.[emojiID];
+      const hash = env.EmojiHashes?.[emojiID];
+      const label = `:${emojiName}:`;
       parts.push(
-        hash ? (
-          <img
-            key={key}
-            class={s.inlineEmoji}
-            src={`/assets/${hash}`}
-            alt={`:${emojiName}:`}
-            title={`:${emojiName}:`}
-            loading="lazy"
-          />
-        ) : (
-          <span key={key} class={s.emojiFallback}>
-            :{emojiName}:
-          </span>
-        ),
-      );
-    } else if (broadcast) {
-      parts.push(
-        <span key={key} class={s.mention}>
-          {broadcast}
-        </span>,
+        hash && /^[a-f0-9]{64}$/i.test(hash)
+          ? `<img class="${s.inlineEmoji}" src="/assets/${hash}" alt="${markdown.utils.escapeHtml(label)}" title="${markdown.utils.escapeHtml(label)}" loading="lazy">`
+          : `<span class="${s.emojiFallback}">${markdown.utils.escapeHtml(label)}</span>`,
       );
     } else if (shortcode) {
       const emoji = emojiForShortcode(shortcode);
-      parts.push(
-        emoji ? (
-          <span key={key} title={`:${shortcode}:`}>
-            {emoji}
-          </span>
-        ) : (
-          match[0]
-        ),
-      );
+      parts.push(markdown.utils.escapeHtml(emoji || match[0]));
     }
-    start = index + match[0].length;
+    start = offset + match[0].length;
   }
-  if (start < message.Content.length) parts.push(message.Content.slice(start));
-  return <>{parts}</>;
+  if (start < value.length) parts.push(markdown.utils.escapeHtml(value.slice(start)));
+  return parts.join("");
+};
+
+export function RichContent({ message }: { message: Message }) {
+  const html = markdown.render(message.Content, message);
+  return <div class={s.richContent} dangerouslySetInnerHTML={{ __html: html }} />;
 }
