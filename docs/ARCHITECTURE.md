@@ -42,7 +42,7 @@ The non-target CONNECT branch is an undecrypted tunnel and does not enter either
 
 Response decompression supports identity, gzip, deflate, brotli, and zstd, with limits on both compressed input and decompressed output size. There are 8 HTTP observation slots, 8 queue slots, and 2 decompression workers. HTTP metadata entering a capture object consists only of target host, canonical path, MIME type, and encoding; it contains no header map, query string, or request body.
 
-REST entry points cover user profiles, guild/channel profiles and lists, message lists and individual messages, and nested results from message search. Strict path matching excludes auth, webhook-token paths, and other unlisted endpoints. It does not dump everything under `/api/`.
+REST entry points cover user profiles, guild/channel profiles and lists, active and archived thread lists, forum thread creation responses, message lists and individual messages, and nested results from message search. Strict path matching excludes auth, webhook-token paths, and other unlisted endpoints. It does not dump everything under `/api/`.
 
 ## Gateway
 
@@ -60,7 +60,9 @@ Primary entities: `users`, `guilds`, `channels`, and `messages`.
 
 Relationships: channels belong to guilds, child channels/threads belong to parent channels, messages belong to channels, and message authors are users. `guild_members` stores observed membership edges, while `channel_recipients` stores observed DM recipient edges. These are not complete member directories, and full relationship cleanup after a member leaves is not implemented.
 
-A user/guild/channel can be completed when its name arrives after its ID. All snowflakes are stored as strings, with ordering based on fixed-width zero-padded strings rather than floating-point conversion. Unknown entities get ID placeholders to prevent foreign-key failures caused by event ordering.
+A user/guild/channel can be completed when its name arrives after its ID. All snowflakes are stored as strings, with ordering based on fixed-width zero-padded strings rather than floating-point conversion. Unknown entities get ID placeholders to prevent foreign-key failures caused by event ordering. Guild membership is reconciled through parent channels after each batch and on schema upgrade. Only explicit DM and group DM channel types appear in the DM list; unresolved channels remain available through the global message archive. Explicit `parent_id: null` clears a prior category relationship, while an omitted parent field leaves it unchanged.
+
+Observed channel `position` is nullable and retained for guild navigation. The console places uncategorized channels before categories, then uses `position` and snowflake ID within each group. Missing positions sort after known positions. Forum (`GUILD_FORUM`) and media (`GUILD_MEDIA`) channels are thread containers: their observed public threads appear as read-only post cards rather than a direct message timeline. Forum channel tags, layout and sort defaults, thread status/flags, and starter messages are projected into typed columns or relationship tables. Forum cards show observed starter attachments and reactions. The reply count uses the larger of the latest observed thread snapshot and locally observed replies, so it is not guaranteed to equal Discord's current count. The archive does not request missing threads or messages from Discord.
 
 Gateway allowlist:
 
@@ -79,6 +81,10 @@ Unknown events are ignored. Fields use explicit projection; values such as `user
 Message edits use nullable fields to mean “leave the existing value unchanged when missing”; an explicit empty string can clear content. Revision order prefers `edited_timestamp`, then the message timestamp, and finally observation time if both are absent. This prevents common old HTTP snapshots from overwriting newer edits, but it does not prove a global causal order. Out-of-order events across connections and missing remote timestamps can remain ambiguous. Deletion sets a tombstone, and old events cannot revive the message; historical content is still retained.
 
 `attachments`, `assets`, and `resource_urls` support attachment metadata and relationships to allowlisted cached images. Enabling caching starts a sequential, size-limited, unauthenticated retry of missing paths on approved CDN hosts. Query strings and fragments are stripped from signed URLs, so replay credentials are not stored; expired signed attachments require a fresh client request. `reaction_totals` stores observed counts and `reaction_users` stores identities observed in Gateway events or reaction-user responses. Historical counts do not imply that every reactor name is known.
+
+Message bodies are rendered in the console with `markdown-it`, with raw HTML disabled. A text-rendering rule resolves the existing observed mentions, cached custom emoji, and standard emoji shortcodes; code spans and blocks retain their literal content. Markdown image syntax does not trigger remote image requests. Attachment previews continue to use authenticated local cache URLs. This is a Markdown presentation layer, not a stored HTML copy of a message.
+
+The overview API exposes the running binary version and SQLite schema version. The console formats message, forum, and certificate timestamps in the browser's local timezone. Message actions copy the raw stored text or a Discord channel/thread link; links are omitted when a channel has not yet been classified as a guild channel or DM. Double-clicking an all-channel result navigates to its source channel or thread and centers that message. Message pages expose cursors in both directions when a cursor bounds the page, allowing periodic infinite-query refetches to rebuild pages after long backward scrolling.
 
 ## SQLite and shutdown
 

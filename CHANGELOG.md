@@ -6,6 +6,27 @@ use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
+### Added
+
+- Preserve observed channel positions and display uncategorized channels above categories.
+- Read-only forum and media channel views with observed thread posts, tags, previews,
+  reactions, reply counts, search, and list/gallery layouts.
+- Render message Markdown with `markdown-it` while retaining observed mentions,
+  custom emoji, and emoji shortcodes.
+- Show application and database schema versions on the overview page. Display observed
+  times in the browser's local timezone and offer message-link and raw-text copy actions.
+- Double-click a message in any all-channel timeline to open its source channel or thread.
+
+### Fixed
+
+- Keep unresolved channels out of direct messages, and reconcile guild membership
+  when a parent channel becomes known.
+- Apply explicit `parent_id: null` updates when a channel leaves its category.
+- Preserve both directions of message pagination across periodic query refetches after
+  scrolling far back in a timeline.
+
 ## [0.1.0] - 2026-09-29
 
 ### Added
@@ -29,5 +50,6 @@ use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Server switching keeps the server rail populated while channels load.
 - Windows CI checks native paths and file ACLs instead of Unix permission bits.
 
-[Unreleased]: https://github.com/billstark001/diskord/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/billstark001/diskord/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/billstark001/diskord/releases/tag/v0.2.0
 [0.1.0]: https://github.com/billstark001/diskord/releases/tag/v0.1.0
