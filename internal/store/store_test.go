@@ -151,6 +151,83 @@ func TestNavigationAndScopedMessages(t *testing.T) {
 		t.Fatalf("channel messages: %+v, %v", rows, err)
 	}
 }
+func TestUnknownChannelResolvesThroughParentAndOrder(t *testing.T) {
+	r := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(k, os.Getenv(k))
+	}
+	if err := securefs.Prepare(r); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err = s.Apply(ctx, model.Batch{Source: "ws", Messages: []model.Message{{ID: "100", ChannelID: model.Ptr("20"), Content: model.Ptr("unknown")}}}); err != nil {
+		t.Fatal(err)
+	}
+	dms, err := s.Channels(ctx, "")
+	if err != nil || len(dms) != 0 {
+		t.Fatalf("unknown shown as DM: %+v, %v", dms, err)
+	}
+	rows, err := s.Messages(ctx, model.Filter{Scope: "dm"})
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("unknown messages shown as DM: %+v, %v", rows, err)
+	}
+	if err = s.Apply(ctx, model.Batch{Source: "ws", Channels: []model.Channel{{ID: "20", ParentID: model.Ptr("10"), Type: model.Ptr(11)}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Apply(ctx, model.Batch{Source: "ws", Channels: []model.Channel{
+		{ID: "10", GuildID: model.Ptr("1"), Type: model.Ptr(15), Position: model.Ptr(3)},
+		{ID: "11", GuildID: model.Ptr("1"), Type: model.Ptr(0), Position: model.Ptr(1)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	channels, err := s.Channels(ctx, "1")
+	if err != nil || len(channels) != 3 || channels[0].ID != "11" || channels[1].ID != "10" || channels[2].ID != "20" || channels[0].Position == nil || *channels[0].Position != 1 {
+		t.Fatalf("resolved ordering: %+v, %v", channels, err)
+	}
+	rows, err = s.Messages(ctx, model.Filter{GuildID: "1"})
+	if err != nil || len(rows) != 1 || rows[0].ID != "100" || rows[0].GuildID != "1" {
+		t.Fatalf("resolved messages: %+v, %v", rows, err)
+	}
+	if err = s.Apply(ctx, model.Batch{Source: "ws", Channels: []model.Channel{{ID: "20", ParentPresent: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	channels, err = s.Channels(ctx, "1")
+	if err != nil || channels[2].ParentID != "" {
+		t.Fatalf("parent removal: %+v, %v", channels, err)
+	}
+}
+func TestForumProjection(t *testing.T) {
+	r := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
+		t.Setenv(k, os.Getenv(k))
+	}
+	if err := securefs.Prepare(r); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err = s.Apply(ctx, model.Batch{Source: "ws", Users: []model.User{{ID: "3", Username: model.Ptr("Alice")}},
+		Channels: []model.Channel{
+			{ID: "10", GuildID: model.Ptr("1"), Type: model.Ptr(15), Name: model.Ptr("Forum"), DefaultSortOrder: model.Ptr(1), HasAvailableTags: true, AvailableTags: []model.ForumTag{{ID: "20", Name: "Bugs"}}},
+			{ID: "11", ParentID: model.Ptr("10"), Type: model.Ptr(11), Name: model.Ptr("Post"), MessageCount: model.Ptr(5), Flags: model.Ptr(2), HasAppliedTags: true, AppliedTags: []string{"20"}},
+		}, Messages: []model.Message{{ID: "11", ChannelID: model.Ptr("11"), AuthorID: model.Ptr("3"), Content: model.Ptr("starter"), Revision: 1}, {ID: "12", ChannelID: model.Ptr("11"), Content: model.Ptr("reply"), Revision: 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	forum, err := s.Forum(ctx, "10")
+	if err != nil || len(forum.Posts) != 1 || forum.Posts[0].ID != "11" || forum.Posts[0].Content != "starter" || forum.Posts[0].AuthorName != "Alice" || forum.Posts[0].ReplyCount != 5 || !forum.Posts[0].Pinned || len(forum.Posts[0].Tags) != 1 || forum.Posts[0].Tags[0] != "Bugs" {
+		t.Fatalf("forum projection: %+v, %v", forum, err)
+	}
+}
 func TestReactionNamesAndMessageIdentity(t *testing.T) {
 	r := t.TempDir()
 	for _, k := range []string{"TMPDIR", "TMP", "TEMP", "SQLITE_TMPDIR", "RANDFILE", "SSLKEYLOGFILE", "SSLKEYLOG_FILE"} {
@@ -263,7 +340,7 @@ func TestSchemaV1UpgradesToReactions(t *testing.T) {
 	}
 	defer s.Close()
 	var version int
-	if err := s.reader.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 3 {
+	if err := s.reader.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 4 {
 		t.Fatalf("migration version %d: %v", version, err)
 	}
 }
@@ -336,11 +413,20 @@ func TestMessageCursorsAndCachedResourceAliases(t *testing.T) {
 		t.Fatalf("latest: %+v, %v", latest, err)
 	}
 	older, err := s.ListBefore(ctx, model.Filter{Before: latest.Before, Limit: 2})
-	if err != nil || len(older.Rows) != 2 || older.Rows[0].ID != "3" || older.Rows[1].ID != "4" || older.Before != "3" {
+	if err != nil || len(older.Rows) != 2 || older.Rows[0].ID != "3" || older.Rows[1].ID != "4" || older.Before != "3" || older.After != "4" {
 		t.Fatalf("older: %+v, %v", older, err)
 	}
-	newer, err := s.ListAfter(ctx, model.Filter{After: "4", Limit: 2})
-	if err != nil || len(newer.Rows) != 2 || newer.Rows[0].ID != "5" || newer.Rows[1].ID != "6" || newer.After != "" {
+	oldest, err := s.ListBefore(ctx, model.Filter{Before: older.Before, Limit: 2})
+	if err != nil || len(oldest.Rows) != 2 || oldest.Rows[0].ID != "1" || oldest.Rows[1].ID != "2" || oldest.Before != "" || oldest.After != "2" {
+		t.Fatalf("oldest: %+v, %v", oldest, err)
+	}
+	// Rebuild the page chain from its oldest page, as an infinite-query refetch does.
+	middleAgain, err := s.ListAfter(ctx, model.Filter{After: oldest.After, Limit: 2})
+	if err != nil || len(middleAgain.Rows) != 2 || middleAgain.Rows[0].ID != "3" || middleAgain.Rows[1].ID != "4" || middleAgain.After != "4" || middleAgain.Before != "3" {
+		t.Fatalf("refetched middle: %+v, %v", middleAgain, err)
+	}
+	newer, err := s.ListAfter(ctx, model.Filter{After: middleAgain.After, Limit: 2})
+	if err != nil || len(newer.Rows) != 2 || newer.Rows[0].ID != "5" || newer.Rows[1].ID != "6" || newer.After != "" || newer.Before != "5" {
 		t.Fatalf("newer: %+v, %v", newer, err)
 	}
 	filtered, err := s.ListBefore(ctx, model.Filter{Query: "message", Limit: 3})

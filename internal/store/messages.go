@@ -46,6 +46,9 @@ func (s *Store) ListBefore(ctx context.Context, f model.Filter) (model.MessagePa
 	if more && len(rows) > 0 {
 		page.Before = rows[0].ID
 	}
+	if f.Before != "" && len(rows) > 0 {
+		page.After = rows[len(rows)-1].ID
+	}
 	return page, nil
 }
 
@@ -65,6 +68,9 @@ func (s *Store) ListAfter(ctx context.Context, f model.Filter) (model.MessagePag
 	page := model.MessagePage{Rows: rows}
 	if more && len(rows) > 0 {
 		page.After = rows[len(rows)-1].ID
+	}
+	if len(rows) > 0 {
+		page.Before = rows[0].ID
 	}
 	return page, nil
 }
@@ -118,7 +124,7 @@ func (s *Store) queryMessages(ctx context.Context, f model.Filter, comparison, c
 		where = append(where, "c.guild_id=?")
 		args = append(args, f.GuildID)
 	} else if f.Scope == "dm" {
-		where = append(where, "c.guild_id IS NULL")
+		where = append(where, "c.guild_id IS NULL AND c.kind IN (1,3)")
 	}
 	if cursor != "" {
 		if !model.ID(cursor) {
@@ -132,7 +138,7 @@ func (s *Store) queryMessages(ctx context.Context, f model.Filter, comparison, c
 	if descending {
 		order = "DESC"
 	}
-	query := `SELECT m.id,COALESCE(m.channel_id,''),` + channelDisplayNameSQL + `,COALESCE(c.guild_id,''),COALESCE(g.name,c.guild_id,''),
+	query := `SELECT m.id,COALESCE(m.channel_id,''),` + channelDisplayNameSQL + `,COALESCE(c.guild_id,''),COALESCE(c.kind,-1),COALESCE(g.name,c.guild_id,''),
 		COALESCE(u.display_name,u.username,u.id,''),COALESCE(m.content,''),COALESCE(m.created_at,''),COALESCE(m.edited_at,''),m.source,m.deleted,
 		COALESCE((SELECT ru.hash FROM resource_urls ru WHERE ru.host IN ('cdn.discordapp.com','media.discordapp.net')
 		AND substr(ru.path,1,length('/avatars/'||u.id||'/'||u.avatar||'.'))='/avatars/'||u.id||'/'||u.avatar||'.' LIMIT 1),'')
@@ -145,7 +151,7 @@ func (s *Store) queryMessages(ctx context.Context, f model.Filter, comparison, c
 	result := []model.MessageRow{}
 	for rows.Next() {
 		var item model.MessageRow
-		if err := rows.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.GuildID, &item.GuildName, &item.AuthorName, &item.Content, &item.Timestamp, &item.EditedTimestamp, &item.Source, &item.Deleted, &item.AvatarHash); err != nil {
+		if err := rows.Scan(&item.ID, &item.ChannelID, &item.ChannelName, &item.GuildID, &item.ChannelKind, &item.GuildName, &item.AuthorName, &item.Content, &item.Timestamp, &item.EditedTimestamp, &item.Source, &item.Deleted, &item.AvatarHash); err != nil {
 			rows.Close()
 			return nil, err
 		}

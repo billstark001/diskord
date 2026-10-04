@@ -24,6 +24,7 @@ import (
 	"diskord/internal/model"
 	"diskord/internal/securefs"
 	"diskord/internal/store"
+	"diskord/internal/version"
 )
 
 //go:embed webdist
@@ -148,6 +149,7 @@ func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store, backg
 	mux.Handle("POST /api/logout", u.auth(http.HandlerFunc(u.logout)))
 	mux.Handle("GET /api/overview", u.auth(http.HandlerFunc(u.overview)))
 	mux.Handle("GET /api/navigation", u.auth(http.HandlerFunc(u.navigation)))
+	mux.Handle("GET /api/forum", u.auth(http.HandlerFunc(u.forum)))
 	mux.Handle("GET /api/messages", u.auth(http.HandlerFunc(u.messages)))
 	mux.Handle("GET /api/settings", u.auth(http.HandlerFunc(u.settings)))
 	mux.Handle("POST /api/settings", u.auth(http.HandlerFunc(u.saveSettings)))
@@ -307,7 +309,7 @@ func (u *UI) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := u.Manager.Current()
-	writeJSON(w, 200, map[string]any{"counts": counts, "stats": u.Engine.Metrics.Snapshot(), "proxy": c.Proxy.Listen, "web": c.Web.Listen, "runtime": u.Manager.Root, "resourcesEnabled": c.Resources.Enabled})
+	writeJSON(w, 200, map[string]any{"counts": counts, "stats": u.Engine.Metrics.Snapshot(), "proxy": c.Proxy.Listen, "web": c.Web.Listen, "runtime": u.Manager.Root, "resourcesEnabled": c.Resources.Enabled, "version": version.Current, "schemaVersion": store.SchemaVersion})
 }
 func (u *UI) navigation(w http.ResponseWriter, r *http.Request) {
 	guildID, scope := r.URL.Query().Get("guild"), r.URL.Query().Get("scope")
@@ -331,6 +333,21 @@ func (u *UI) navigation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{"guilds": guilds, "channels": channels})
+}
+func (u *UI) forum(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("channel")
+	if !model.ID(id) {
+		problem(w, 400, "invalid forum ID")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	forum, err := u.Store.Forum(ctx, id)
+	if err != nil {
+		problem(w, 503, "forum unavailable")
+		return
+	}
+	writeJSON(w, 200, forum)
 }
 func (u *UI) messages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()

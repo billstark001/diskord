@@ -26,6 +26,8 @@ import (
 //go:embed schema.sql
 var schema string
 
+const SchemaVersion = 4
+
 type Store struct {
 	writer, reader *sql.DB
 	Root           string
@@ -118,7 +120,69 @@ func Open(root string) (*Store, error) {
 		}
 		version = 3
 	}
-	if version != 3 {
+	if version == 3 {
+		columns := map[string]bool{}
+		rows, err := w.Query("PRAGMA table_info(channels)")
+		if err != nil {
+			return fail(err)
+		}
+		for rows.Next() {
+			var ordinal, required, primary int
+			var name, kind string
+			var defaultValue any
+			if err = rows.Scan(&ordinal, &name, &kind, &required, &defaultValue, &primary); err != nil {
+				break
+			}
+			columns[name] = true
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		rows.Close()
+		if err != nil {
+			return fail(err)
+		}
+		tx, err := w.Begin()
+		if err != nil {
+			return fail(err)
+		}
+		for _, statement := range []string{
+			"ALTER TABLE channels ADD COLUMN position INTEGER",
+			"ALTER TABLE channels ADD COLUMN topic TEXT",
+			"ALTER TABLE channels ADD COLUMN owner_id TEXT",
+			"ALTER TABLE channels ADD COLUMN last_message_id TEXT",
+			"ALTER TABLE channels ADD COLUMN message_count INTEGER",
+			"ALTER TABLE channels ADD COLUMN flags INTEGER",
+			"ALTER TABLE channels ADD COLUMN archived INTEGER",
+			"ALTER TABLE channels ADD COLUMN archive_timestamp TEXT",
+			"ALTER TABLE channels ADD COLUMN created_at TEXT",
+			"ALTER TABLE channels ADD COLUMN default_sort_order INTEGER",
+			"ALTER TABLE channels ADD COLUMN default_forum_layout INTEGER",
+			"CREATE TABLE IF NOT EXISTS forum_tags(channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, tag_id TEXT NOT NULL, name TEXT NOT NULL, emoji_id TEXT NOT NULL DEFAULT '', emoji_name TEXT NOT NULL DEFAULT '', PRIMARY KEY(channel_id,tag_id))",
+			"CREATE TABLE IF NOT EXISTS thread_tags(thread_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, tag_id TEXT NOT NULL, PRIMARY KEY(thread_id,tag_id))",
+			"UPDATE schema_version SET version=4 WHERE version=3",
+		} {
+			if strings.HasPrefix(statement, "ALTER TABLE channels ADD COLUMN ") {
+				field := strings.Fields(statement)[5]
+				if columns[field] {
+					continue
+				}
+			}
+			if _, err = tx.Exec(statement); err != nil {
+				tx.Rollback()
+				return fail(err)
+			}
+		}
+		if err = reconcileChannelGuilds(tx); err != nil {
+			tx.Rollback()
+			return fail(err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fail(err)
+		}
+		version = 4
+	}
+	if version != SchemaVersion {
 		return fail(errors.New("unsupported database schema version"))
 	}
 	r, e := sql.Open("sqlite", u.String())
@@ -193,6 +257,26 @@ func merge(tx *sql.Tx, table, id string, values map[string]any) error {
 	_, e := tx.Exec("UPDATE "+table+" SET "+strings.Join(assign, ",")+" WHERE id=?", args...)
 	return e
 }
+
+// Channel objects from Gateway guild dispatches may omit guild_id. Resolve
+// descendants whenever a parent gains a guild, including pre-migration rows.
+func reconcileChannelGuilds(tx *sql.Tx) error {
+	for {
+		result, err := tx.Exec(`UPDATE channels SET guild_id=(SELECT p.guild_id FROM channels p WHERE p.id=channels.parent_id)
+			WHERE guild_id IS NULL AND parent_id IS NOT NULL AND EXISTS
+			(SELECT 1 FROM channels p WHERE p.id=channels.parent_id AND p.guild_id IS NOT NULL)`)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
+	}
+}
 func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 	tx, e := s.writer.BeginTx(ctx, nil)
 	if e != nil {
@@ -234,6 +318,8 @@ func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 				return e
 			}
 			set(v, "parent_id", c.ParentID)
+		} else if c.ParentPresent {
+			v["parent_id"] = nil
 		}
 		set(v, "name", c.Name)
 		if c.Name != nil && placeholderChannelName(*c.Name) {
@@ -247,9 +333,52 @@ func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 			}
 		}
 		set(v, "kind", c.Type)
+		set(v, "position", c.Position)
+		set(v, "topic", c.Topic)
+		if c.TopicPresent && c.Topic == nil {
+			v["topic"] = nil
+		}
+		set(v, "owner_id", c.OwnerID)
+		set(v, "last_message_id", c.LastMessageID)
+		set(v, "message_count", c.MessageCount)
+		set(v, "flags", c.Flags)
+		set(v, "archived", c.Archived)
+		set(v, "archive_timestamp", c.ArchiveTimestamp)
+		set(v, "created_at", c.CreatedAt)
+		set(v, "default_sort_order", c.DefaultSortOrder)
+		if c.DefaultSortOrderPresent && c.DefaultSortOrder == nil {
+			v["default_sort_order"] = nil
+		}
+		set(v, "default_forum_layout", c.DefaultForumLayout)
 		set(v, "deleted", c.Deleted)
 		if e = merge(tx, "channels", c.ID, v); e != nil {
 			return e
+		}
+		if c.HasAvailableTags {
+			if _, e = tx.Exec("DELETE FROM forum_tags WHERE channel_id=?", c.ID); e != nil {
+				return e
+			}
+			for _, tag := range c.AvailableTags {
+				if !model.ID(tag.ID) {
+					continue
+				}
+				if _, e = tx.Exec("INSERT INTO forum_tags(channel_id,tag_id,name,emoji_id,emoji_name) VALUES(?,?,?,?,?)", c.ID, tag.ID, tag.Name, tag.EmojiID, tag.EmojiName); e != nil {
+					return e
+				}
+			}
+		}
+		if c.HasAppliedTags {
+			if _, e = tx.Exec("DELETE FROM thread_tags WHERE thread_id=?", c.ID); e != nil {
+				return e
+			}
+			for _, id := range c.AppliedTags {
+				if !model.ID(id) {
+					continue
+				}
+				if _, e = tx.Exec("INSERT OR IGNORE INTO thread_tags(thread_id,tag_id) VALUES(?,?)", c.ID, id); e != nil {
+					return e
+				}
+			}
 		}
 		if c.Recipients != nil {
 			if _, e = tx.Exec("DELETE FROM channel_recipients WHERE channel_id=?", c.ID); e != nil {
@@ -267,6 +396,9 @@ func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 				}
 			}
 		}
+	}
+	if e = reconcileChannelGuilds(tx); e != nil {
+		return e
 	}
 	for _, m := range b.Members {
 		if !model.ID(m.GuildID) || !model.ID(m.UserID) {
@@ -379,11 +511,11 @@ func (s *Store) Guilds(ctx context.Context) ([]model.GuildRow, error) {
 }
 
 const channelDisplayNameSQL = `COALESCE(NULLIF(c.name,''),
-	CASE WHEN c.guild_id IS NULL THEN
+	CASE WHEN c.guild_id IS NULL AND c.kind IN (1,3) THEN
 		(SELECT group_concat(COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),u.id), ', ')
 		FROM channel_recipients cr JOIN users u ON u.id=cr.user_id WHERE cr.channel_id=c.id)
 	END,
-	CASE WHEN c.guild_id IS NULL THEN
+	CASE WHEN c.guild_id IS NULL AND c.kind IN (1,3) THEN
 		(SELECT COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),u.id)
 		FROM messages m JOIN users u ON u.id=m.author_id WHERE m.channel_id=c.id
 		ORDER BY m.sort_key DESC LIMIT 1)
@@ -393,10 +525,10 @@ func (s *Store) Channels(ctx context.Context, guildID string) ([]model.ChannelRo
 	if guildID != "" && !model.ID(guildID) {
 		return nil, errors.New("invalid guild ID")
 	}
-	query := `SELECT c.id, COALESCE(c.guild_id,''), COALESCE(c.parent_id,''), ` + channelDisplayNameSQL + ` AS display_name, COALESCE(c.kind,-1), c.deleted FROM channels c WHERE c.guild_id IS NULL ORDER BY lower(display_name), c.id`
+	query := `SELECT c.id, COALESCE(c.guild_id,''), COALESCE(c.parent_id,''), ` + channelDisplayNameSQL + ` AS display_name, COALESCE(c.kind,-1), c.position, c.deleted FROM channels c WHERE c.guild_id IS NULL AND c.kind IN (1,3) ORDER BY lower(display_name), c.id`
 	args := []any{}
 	if guildID != "" {
-		query = `SELECT c.id, COALESCE(c.guild_id,''), COALESCE(c.parent_id,''), ` + channelDisplayNameSQL + ` AS display_name, COALESCE(c.kind,-1), c.deleted FROM channels c WHERE c.guild_id=? ORDER BY lower(display_name), c.id`
+		query = `SELECT c.id, COALESCE(c.guild_id,''), COALESCE(c.parent_id,''), ` + channelDisplayNameSQL + ` AS display_name, COALESCE(c.kind,-1), c.position, c.deleted FROM channels c WHERE c.guild_id=? ORDER BY c.position IS NULL, c.position, c.id`
 		args = append(args, guildID)
 	}
 	rows, err := s.reader.QueryContext(ctx, query, args...)
@@ -407,7 +539,7 @@ func (s *Store) Channels(ctx context.Context, guildID string) ([]model.ChannelRo
 	result := []model.ChannelRow{}
 	for rows.Next() {
 		var item model.ChannelRow
-		if err := rows.Scan(&item.ID, &item.GuildID, &item.ParentID, &item.Name, &item.Kind, &item.Deleted); err != nil {
+		if err := rows.Scan(&item.ID, &item.GuildID, &item.ParentID, &item.Name, &item.Kind, &item.Position, &item.Deleted); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

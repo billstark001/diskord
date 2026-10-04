@@ -17,11 +17,23 @@ type Guild struct {
 	Unavailable, Deleted *bool
 }
 type Channel struct {
-	ID                      string
-	GuildID, ParentID, Name *string
-	Type                    *int
-	Deleted                 *bool
-	Recipients              []string
+	ID                                                         string
+	GuildID, ParentID, Name                                    *string
+	ParentPresent                                              bool
+	Type, Position                                             *int
+	Deleted                                                    *bool
+	Recipients                                                 []string
+	Topic, OwnerID, LastMessageID, ArchiveTimestamp, CreatedAt *string
+	MessageCount, Flags, DefaultSortOrder, DefaultForumLayout  *int
+	Archived                                                   *bool
+	TopicPresent, DefaultSortOrderPresent                      bool
+	AvailableTags                                              []ForumTag
+	HasAvailableTags                                           bool
+	AppliedTags                                                []string
+	HasAppliedTags                                             bool
+}
+type ForumTag struct {
+	ID, Name, EmojiID, EmojiName string
 }
 type Member struct{ GuildID, UserID string }
 type Attachment struct {
@@ -94,6 +106,7 @@ func Revision(edited, created *string, fallback int64) int64 {
 
 type MessageRow struct {
 	ID, ChannelID, ChannelName, GuildID, GuildName, AuthorName, Content string
+	ChannelKind                                                         int
 	Timestamp, EditedTimestamp, Source                                  string
 	AvatarHash                                                          string
 	Deleted                                                             bool
@@ -116,7 +129,21 @@ type GuildRow struct {
 type ChannelRow struct {
 	ID, GuildID, ParentID, Name string
 	Kind                        int
+	Position                    *int
 	Deleted                     bool
+}
+type ForumPostRow struct {
+	ID, Name, AuthorName, Content, CreatedAt, LastActivity, LastActivityID string
+	ReplyCount                                                             int
+	Archived, Pinned, Deleted                                              bool
+	Tags                                                                   []string
+	Attachment                                                             AssetRow
+	Reactions                                                              []ReactionRow
+}
+type ForumRow struct {
+	ID, Name, Topic                      string
+	DefaultSortOrder, DefaultForumLayout *int
+	Posts                                []ForumPostRow
 }
 type AssetRow struct{ Name, Hash string }
 type Filter struct {

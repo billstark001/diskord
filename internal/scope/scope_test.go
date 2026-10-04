@@ -13,7 +13,7 @@ func TestScope(t *testing.T) {
 			t.Fatal(h)
 		}
 	}
-	for _, p := range []string{"/api/v10/channels/123/messages", "/api/v9/users/@me", "/api/v9/guilds/123/messages/search", "/api/v9/channels/2/messages/10/reactions/%F0%9F%91%8D"} {
+	for _, p := range []string{"/api/v10/channels/123/messages", "/api/v9/users/@me", "/api/v9/guilds/123/messages/search", "/api/v9/channels/2/messages/10/reactions/%F0%9F%91%8D", "/api/v10/guilds/123/threads/active", "/api/v10/channels/123/threads/archived/public", "/api/v10/channels/123/threads"} {
 		if Endpoint(p) == "" {
 			t.Fatal(p)
 		}

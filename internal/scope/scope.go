@@ -12,7 +12,7 @@ import (
 
 var resumeGateway = regexp.MustCompile(`^gateway(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?\.discord\.gg$`)
 var apiPrefix = regexp.MustCompile(`^/api/(?:v[0-9]+/)?`)
-var entityPath = regexp.MustCompile(`^(?:users/(?:@me|[0-9]+)(?:/(?:guilds|channels))?|guilds/[0-9]+(?:/(?:channels|messages/search))?|channels/[0-9]+(?:/messages(?:/(?:[0-9]+(?:/reactions/[^/]+)?|search))?)?)$`)
+var entityPath = regexp.MustCompile(`^(?:users/(?:@me|[0-9]+)(?:/(?:guilds|channels))?|guilds/[0-9]+(?:/(?:channels|messages/search|threads/active))?|channels/[0-9]+(?:/messages(?:/(?:[0-9]+(?:/reactions/[^/]+)?|search))?|/threads(?:/archived/(?:public|private))?)?)$`)
 
 func Host(s string) string {
 	if h, _, e := net.SplitHostPort(s); e == nil {

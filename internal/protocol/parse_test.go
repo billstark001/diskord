@@ -75,6 +75,24 @@ func TestNumericSnowflakesPreserveDigits(t *testing.T) {
 		t.Fatalf("numeric IDs lost precision: %+v", b)
 	}
 }
+func TestChannelPositionAndForumThreads(t *testing.T) {
+	b, err := HTTP("/api/v10/guilds/1/channels", []byte(`[{"id":"10","type":15,"name":"Forum","position":2,"available_tags":[{"id":"20","name":"Bugs"}],"default_sort_order":1,"default_forum_layout":2}]`))
+	if err != nil || len(b.Channels) != 1 || b.Channels[0].GuildID == nil || *b.Channels[0].GuildID != "1" || b.Channels[0].Position == nil || *b.Channels[0].Position != 2 || len(b.Channels[0].AvailableTags) != 1 {
+		t.Fatalf("forum channel projection: %+v, %v", b, err)
+	}
+	b, err = HTTP("/api/v10/channels/10/threads/archived/public", []byte(`{"threads":[{"id":"30","type":11,"name":"Post","applied_tags":["20"],"thread_metadata":{"archived":true}}]}`))
+	if err != nil || len(b.Channels) != 1 || b.Channels[0].ParentID == nil || *b.Channels[0].ParentID != "10" || b.Channels[0].Archived == nil || !*b.Channels[0].Archived {
+		t.Fatalf("archived thread projection: %+v, %v", b, err)
+	}
+	b, err = HTTP("/api/v10/channels/10/threads", []byte(`{"id":"31","type":11,"message":{"id":"31","content":"starter"}}`))
+	if err != nil || len(b.Channels) != 1 || len(b.Messages) != 1 || b.Messages[0].ChannelID == nil || *b.Messages[0].ChannelID != "31" {
+		t.Fatalf("forum starter projection: %+v, %v", b, err)
+	}
+	b, err = Gateway([]byte(`{"op":0,"t":"CHANNEL_UPDATE","d":{"id":"32","parent_id":null}}`))
+	if err != nil || len(b.Channels) != 1 || !b.Channels[0].ParentPresent || b.Channels[0].ParentID != nil {
+		t.Fatalf("explicit parent removal: %+v, %v", b, err)
+	}
+}
 func TestOutageNotDeletion(t *testing.T) {
 	b, e := Gateway([]byte(`{"op":0,"t":"GUILD_DELETE","d":{"id":"1","unavailable":true}}`))
 	if e != nil || b.Guilds[0].Deleted != nil {

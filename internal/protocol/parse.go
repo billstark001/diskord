@@ -142,7 +142,33 @@ func (p *parser) channel(o object, gid string, deleted bool) {
 	if !model.ID(id) {
 		return
 	}
-	c := model.Channel{ID: id, GuildID: inherited(o, "guild_id", gid), ParentID: idp(o, "parent_id"), Name: sp(o, "name"), Type: ip(o, "type"), Deleted: model.Ptr(deleted)}
+	_, parentPresent := o["parent_id"]
+	metadata := obj(o["thread_metadata"])
+	c := model.Channel{
+		ID: id, GuildID: inherited(o, "guild_id", gid), ParentID: idp(o, "parent_id"), ParentPresent: parentPresent,
+		Name: sp(o, "name"), Type: ip(o, "type"), Position: ip(o, "position"), Deleted: model.Ptr(deleted),
+		Topic: sp(o, "topic"), OwnerID: idp(o, "owner_id"), LastMessageID: idp(o, "last_message_id"),
+		MessageCount: ip(o, "message_count"), Flags: ip(o, "flags"), Archived: bp(metadata, "archived"),
+		ArchiveTimestamp: sp(metadata, "archive_timestamp"), CreatedAt: sp(metadata, "create_timestamp"),
+		DefaultSortOrder: ip(o, "default_sort_order"), DefaultForumLayout: ip(o, "default_forum_layout"),
+	}
+	_, c.TopicPresent = o["topic"]
+	_, c.DefaultSortOrderPresent = o["default_sort_order"]
+	if _, c.HasAvailableTags = o["available_tags"]; c.HasAvailableTags {
+		for _, raw := range arr(o["available_tags"]) {
+			tag := obj(raw)
+			if tagID := str(tag["id"]); model.ID(tagID) {
+				c.AvailableTags = append(c.AvailableTags, model.ForumTag{ID: tagID, Name: str(tag["name"]), EmojiID: str(tag["emoji_id"]), EmojiName: str(tag["emoji_name"])})
+			}
+		}
+	}
+	if _, c.HasAppliedTags = o["applied_tags"]; c.HasAppliedTags {
+		for _, raw := range arr(o["applied_tags"]) {
+			if tagID := str(raw); model.ID(tagID) {
+				c.AppliedTags = append(c.AppliedTags, tagID)
+			}
+		}
+	}
 	if _, ok := o["recipients"]; ok {
 		c.Recipients = make([]string, 0)
 	}
@@ -221,6 +247,9 @@ func (p *parser) message(o object, channel string, deleted bool) {
 		m.Revision = model.Revision(m.EditedTimestamp, m.Timestamp, p.now)
 	}
 	p.b.Messages = append(p.b.Messages, m)
+	if thread := obj(o["thread"]); len(thread) > 0 {
+		p.channel(thread, gid, false)
+	}
 }
 
 func Gateway(data []byte) (model.Batch, error) {
@@ -364,6 +393,28 @@ func HTTP(path string, data []byte) (model.Batch, error) {
 				p.message(obj(m), "", false)
 			}
 		}
+	case parts[0] == "guilds" && len(parts) == 4 && parts[2] == "threads" && parts[3] == "active":
+		for _, raw := range arr(obj(data)["threads"]) {
+			p.channel(obj(raw), parts[1], false)
+		}
+	case parts[0] == "channels" && len(parts) == 5 && parts[2] == "threads" && parts[3] == "archived":
+		for _, raw := range arr(obj(data)["threads"]) {
+			thread := obj(raw)
+			if _, ok := thread["parent_id"]; !ok {
+				thread["parent_id"] = json.RawMessage(`"` + parts[1] + `"`)
+			}
+			p.channel(thread, "", false)
+		}
+	case parts[0] == "channels" && len(parts) == 3 && parts[2] == "threads":
+		each(func(o object) {
+			if _, ok := o["parent_id"]; !ok {
+				o["parent_id"] = json.RawMessage(`"` + parts[1] + `"`)
+			}
+			p.channel(o, "", false)
+			if message := obj(o["message"]); len(message) > 0 {
+				p.message(message, str(o["id"]), false)
+			}
+		})
 	case parts[0] == "channels" && len(parts) >= 3 && parts[2] == "messages":
 		each(func(o object) { p.message(o, parts[1], false) })
 	case parts[0] == "channels":
