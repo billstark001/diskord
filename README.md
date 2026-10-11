@@ -1,6 +1,6 @@
 # diskord · Local Discord Message Observation Proxy
 
-Go 1.27 / go-mitmproxy / Preact + TypeScript + Vite / SQLite. The console uses signals, TanStack Query, vanilla-extract styles, and a small built-in Chinese/English dictionary. The repository includes pinned Go and pnpm dependency checksums and the built frontend assets embedded into the Go binary. The local `dist/` directory holds only built binaries; integration with the Discord desktop client still needs to be tested on each target machine.
+Go 1.27 / go-mitmproxy / Preact + TypeScript + Vite / SQLite. The console uses signals, TanStack Query, vanilla-extract styles, and a small built-in Chinese/English dictionary. The repository includes pinned Go and pnpm dependency checksums; the build generates frontend assets and embeds them into the Go binary. Generated frontend files and the local `dist/` binaries are ignored by Git. Integration with the Discord desktop client still needs to be tested on each target machine.
 
 Observe only local traffic from your own devices and accounts, or traffic for which you have explicit authorization. The application does not automatically install a root certificate, change the system proxy, request Discord history, read browser account databases, or extract or replay authentication credentials.
 
@@ -9,7 +9,7 @@ Observe only local traffic from your own devices and accounts, or traffic for wh
 | Requirement | Implementation |
 | --- | --- |
 | Single binary | The final Go binary embeds the compiled Preact console. SQLite uses a pure Go driver, and the final build disables CGO. |
-| One YAML file / one runtime directory | Defaults to `diskord.yaml` and `runtime_dir: .`, where `.` is the process working directory. Temporary writes controlled by the application go under `tmp/` in the runtime directory. |
+| One YAML file / one runtime directory | Defaults to `diskord.yaml` and `runtime_dir: .`, where `.` is the process working directory. Normal capture and online staging use runtime `tmp/`; explicit export outputs and offline staging remain outside the source runtime. |
 | Console | Defaults to `127.0.0.1:3900`; provides Chinese/English pages, version metadata, a read-only observed server/category/channel browser with channel positions and forum post views, Markdown messages, local-time timestamps, message copy and navigation actions, message search and pagination, a resource toggle, and CA issuance and selection. The Preact shell preserves scroll position across local actions. |
 | Persistent proxy | Defaults to `127.0.0.1:3901`; starts with `run`, operates whether or not the web page is open, and stops when the process exits. |
 | CA | Invokes system OpenSSL explicitly; requires certificate and private key paths, reports a missing tool, validates the certificate before selection, and never grants trust automatically. |
@@ -18,6 +18,7 @@ Observe only local traffic from your own devices and accounts, or traffic for wh
 | Entities and relationships | Users, guilds, channels, and messages, with member, DM recipient, and attachment relationships; string IDs, sparse edits, and deletion markers. |
 | Raw traffic | **No raw database is created.** `capture.raw: true` produces an error instead of silently changing privacy behavior. |
 | Resources | Disabled by default. When enabled, allowlisted CDN images passing through the proxy are cached. Enabling it also retries previously observed missing CDN paths, with per-file and total size limits. |
+| Automation and export | Versioned loopback read-only API with a separate token; online/offline query CLI; thread/channel and creation-time selection; Markdown or JSONL exports, optionally packaged with cached attachment images in ZIP. |
 | Platforms | Provides Windows/macOS build and integration instructions. Whether the client accepts proxy arguments and trusts the CA still requires testing. |
 
 This is an archive built from observed traffic, not a full client sync: historical messages the client never requested will not appear. Events with unsupported encodings or over size limits are skipped, and the console displays the relevant counters.
@@ -58,7 +59,7 @@ Windows PowerShell:
 
 The build scripts install from the pinned pnpm lockfile, typecheck and compile the frontend, resolve Go dependencies, run tests, and create `dist/diskord-<os>-<arch>[.exe]`. They stop if any step fails. Generated frontend assets in `internal/ui/webdist/` are ignored by Git. The frontend build script hashes its source inputs and verifies cached output hashes, so repeated builds reuse unchanged assets. Set `FORCE_FRONTEND_BUILD=1` (PowerShell: `$env:FORCE_FRONTEND_BUILD = '1'`) to rebuild them, or run `make generate`. Build caches and temporary files go under `.build/`.
 
-Prebuilt binaries in `dist/` are unsigned and not notarized. On a fresh checkout, build the frontend first with `node scripts/build-frontend.mjs` before running `go build ./cmd/diskord`, or use the project build script. Go modules are not vendored; an offline rebuild still requires a populated module cache. The target system trust chain and the behavior of Chrome and the Discord desktop application must be tested using [the acceptance checklist](docs/ACCEPTANCE.md).
+Prebuilt binaries in `dist/` are unsigned and not notarized. On a fresh checkout, build the frontend first with `node scripts/build-frontend.mjs` before running `go build ./cmd/diskord`, or use the project build script. Go modules are not vendored; an offline rebuild still requires a populated module cache. The target system trust chain and the behavior of Chrome and the Discord desktop application must be tested using [the platform guide](docs/PLATFORMS.md).
 
 ## GitHub releases
 
@@ -135,6 +136,24 @@ At runtime, the web console hot-updates only `resources.enabled` and a validated
 
 `run`, CLI issuance, CLI selection, and CLI configuration changes are mutually exclusive through an operating system file lock. When the proxy is running, use the web console to avoid two processes writing to the same directory. `ui-token` and `doctor` may run in another terminal.
 
+## Read-only automation and export
+
+Right-click a server, channel/category, forum post, or message with an observed channel to export its local archive, or use the message view's export button. The dialog offers current/all scope, local time bounds, Markdown/JSONL, child threads, and optional cached-attachment ZIPs, using the existing console session.
+
+`status`, `guilds`, `dms`, `channels`, `threads`, `messages`, and `export` use the running instance's local read-only API by default. The CLI reads the separate `state/api-token`, created when the updated server first starts. `api-token` prints that existing token for explicit API integrations; it never initializes a runtime. The token does not grant configuration or CA administration rights.
+
+```sh
+./diskord status
+./diskord channels
+./diskord messages --thread 234567890123456789 --limit 100
+./diskord export --thread 234567890123456789 --since '2026-10-01T00:00:00+09:00' --until '2026-10-08T00:00:00+09:00' --format md --output ../thread.md
+./diskord export --thread 234567890123456789 --format jsonl --attachments --output ../thread.zip
+```
+
+`--thread` also accepts ordinary channel IDs; omitting it selects all local messages. CLI dates can omit the time or timezone: a date-only start begins at local midnight, and a date-only end includes the whole final date; omitted bounds are unbounded. `--thread-name` matches exact names and reports every ambiguous candidate with its server/private-conversation ownership. Navigation listings share the browser order, using observed positions and latest private-message activity. Time bounds select creation time with an ID-derived fallback and use `[since, until)`. Exports include the latest observed states and deletion markers, not edit history or a guarantee of complete Discord history. Missing attachments are reported, never fetched. Text exports can go to stdout; attachment exports produce ZIP.
+
+Add `--offline` to read an existing stopped archive without changing its files, permissions, or schema. It rejects active runtimes and nonempty WAL files. Offline exports require an explicit output file. File outputs must be new paths outside the source runtime. See [the archive interface guide](docs/ARCHIVE.md) for API routes, schemas, authentication, limits, and Windows examples.
+
 ## Runtime directory
 
 ```text
@@ -149,12 +168,13 @@ runtime/
   resources/           # Passive image cache named by content hash
   state/
     ui-token           # Local administration token
+    api-token          # Separate read-only archive token; created on server startup
     diskord.lock       # File used for the operating system lock
   tmp/                 # Staging for atomic writes, temporary OpenSSL config, etc.
   logs/                # Optional diskord and Discord file logs
 ```
 
-These constraints apply to **file writes controlled by diskord itself**. They do not mean the operating system or external clients never write files: system certificate stores, Chrome / Discord configuration, swap, crash dumps, and security software are outside the application's control. A separate Chrome profile can be placed under the runtime directory for testing; diskord does not take over Discord's normal data directory.
+Normal capture and online export preparation write under the runtime. Explicit export files are written outside the source runtime; offline exports stage privately beside their chosen output so the source remains unchanged. These constraints apply to **file writes controlled by diskord itself**. They do not mean the operating system or external clients never write files: system certificate stores, Chrome / Discord configuration, swap, crash dumps, and security software are outside the application's control. A separate Chrome profile can be placed under the runtime directory for testing; diskord does not take over Discord's normal data directory.
 
 ## Capture scope and boundaries
 
@@ -180,8 +200,8 @@ The console has loopback binding, an access token, HttpOnly / SameSite cookies, 
 
 ## File guide
 
-`docs/ARCHITECTURE.md`: data paths, events, relationships, and reliability decisions.  
-`docs/SECURITY.md`: sensitive data boundaries, certificates, disk, and local attack surface.  
-`docs/PLATFORMS.md`: explicit Windows/macOS and Chrome/Discord integration steps.  
-`docs/ACCEPTANCE.md`: target-platform acceptance checklist.  
-`THIRD_PARTY.md`: dependency and asset information.
+- `docs/ARCHITECTURE.md`: data paths, events, relationships, and reliability decisions.
+- `docs/ARCHIVE.md`: read-only API/CLI, export formats, time semantics, and offline access.
+- `docs/SECURITY.md`: sensitive data boundaries, certificates, disk, and local attack surface.
+- `docs/PLATFORMS.md`: explicit Windows/macOS and Chrome/Discord integration steps.
+- `THIRD_PARTY.md`: dependency and asset information.

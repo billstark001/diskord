@@ -1,6 +1,6 @@
 # Windows / macOS Integration Guide
 
-**These are procedures awaiting acceptance tests on actual machines, not a completed compatibility certification.** Local `dist/` builds or GitHub Releases provide unsigned Windows/macOS binaries; they still need to be started and tested on each target system. Electron documentation says `--proxy-server` applies to HTTP/HTTPS/WebSocket, but this does not guarantee every Discord distribution accepts or preserves the Chromium arguments it receives. [S3] Chrome's manual HTTP proxy supports CONNECT and WebSocket routing. [S2] See `SOURCES.md` for reference links.
+**These are procedures awaiting acceptance tests on actual machines, not a completed compatibility certification.** Local `dist/` builds or GitHub Releases provide unsigned Windows/macOS binaries; they still need to be started and tested on each target system. [Electron's command-line documentation](https://www.electronjs.org/docs/latest/api/command-line-switches#--proxy-serveraddressport) says `--proxy-server` applies to HTTP/HTTPS/WebSocket, but this does not guarantee every Discord distribution accepts or preserves the Chromium arguments it receives. [Chromium's proxy documentation](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md) describes CONNECT and WebSocket routing through the HTTP proxy.
 
 Start with a test account and test channel containing no sensitive content. Do not use a long-running session from an existing work or personal account for the first test.
 
@@ -101,3 +101,9 @@ Run `doctor` first to check the YAML, paths, toolchain, and CA validity period. 
 Also inspect the console counters for parsed HTTP, parsed Gateway events, current WS connections, queue drops, decode errors, and storage errors. Do not export real tokens or raw payloads for troubleshooting. Unauthenticated requests, APIs outside the allowlist, content served from a browser cache/Service Worker, and old connections that have not reconnected may produce no new capture.
 
 After changing the CA, update manual trust and reconnect. Changing the resource toggle affects subsequent processing and new CDN CONNECT sessions. Existing TLS sessions cannot have their decryption “undone”; once resource capture is disabled, subsequent responses on those sessions also stop entering the cache.
+
+## 5. Archive automation and export
+
+The [archive interface guide](ARCHIVE.md) documents the same read-only commands on Windows and macOS, including thread/time filters and optional attachment ZIPs. Online commands read `state/api-token` and use the loopback service without opening or migrating SQLite. Use `--offline` only on a stopped archive with no nonempty WAL; it holds the existing lock read-only and does not change source permissions or create sidecars. Windows output files use protected user/SYSTEM ACLs.
+
+Run acceptance against a synthetic dedicated runtime, with export output paths outside it. Check UTF-8 content, filenames containing path separators, missing attachments, timezone bounds, existing-output rejection, and lock/WAL rejection on each target platform. Cross-compilation is not proof of native filesystem, ACL, lock, client, or certificate behavior. QUIC interception remains deferred.
