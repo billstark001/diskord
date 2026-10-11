@@ -39,6 +39,7 @@ func newRootCommand() *cobra.Command {
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return fmt.Errorf("%s: %w (run %s --help)", cmd.CommandPath(), err, cmd.CommandPath())
 	})
+	addArchiveCommands(root, &configPath)
 
 	var runtimeDir, openssl string
 	initCmd := &cobra.Command{Use: "init", Short: "Initialize a runtime directory", Args: cobra.NoArgs,
