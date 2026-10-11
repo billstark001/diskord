@@ -110,7 +110,7 @@ func applyReactions(tx *sql.Tx, batch model.Batch) error {
 }
 
 func (s *Store) messageReactions(ctx context.Context, messageID string) ([]model.ReactionRow, error) {
-	rows, err := s.reader.QueryContext(ctx, `SELECT t.emoji_key,t.emoji_id,t.emoji_name,t.animated,t.count,
+	rows, err := s.queries().QueryContext(ctx, `SELECT t.emoji_key,t.emoji_id,t.emoji_name,t.animated,t.count,
 		COALESCE((SELECT r.hash FROM resource_urls r WHERE r.host IN ('cdn.discordapp.com','media.discordapp.net')
         AND substr(r.path,1,length('/emojis/'||t.emoji_id||'.'))='/emojis/'||t.emoji_id||'.' LIMIT 1),'')
         FROM reaction_totals t WHERE t.message_id=? AND t.count>0 ORDER BY t.emoji_key`, messageID)
@@ -125,7 +125,7 @@ func (s *Store) messageReactions(ctx context.Context, messageID string) ([]model
 		if err := rows.Scan(&key, &reaction.EmojiID, &reaction.EmojiName, &reaction.Animated, &reaction.Count, &reaction.EmojiHash); err != nil {
 			return nil, err
 		}
-		names, err := s.reader.QueryContext(ctx, `SELECT COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),u.id) FROM reaction_users r JOIN users u ON u.id=r.user_id WHERE r.message_id=? AND r.emoji_key=? ORDER BY lower(COALESCE(u.display_name,u.username,u.id))`, messageID, key)
+		names, err := s.queries().QueryContext(ctx, `SELECT COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),u.id) FROM reaction_users r JOIN users u ON u.id=r.user_id WHERE r.message_id=? AND r.emoji_key=? ORDER BY lower(COALESCE(u.display_name,u.username,u.id))`, messageID, key)
 		if err != nil {
 			return nil, err
 		}

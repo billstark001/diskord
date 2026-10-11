@@ -29,7 +29,7 @@ func (s *Store) MissingResources(ctx context.Context) ([]ResourceTarget, error) 
 		seen[target] = true
 		targets = append(targets, target)
 	}
-	attachments, err := s.reader.QueryContext(ctx, `SELECT DISTINCT a.host,a.path FROM attachments a
+	attachments, err := s.queries().QueryContext(ctx, `SELECT DISTINCT a.host,a.path FROM attachments a
         LEFT JOIN resource_urls r ON r.host=a.host AND r.path=a.path
         WHERE r.hash IS NULL ORDER BY a.host,a.path`)
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *Store) MissingResources(ctx context.Context) ([]ResourceTarget, error) 
 	if err != nil {
 		return nil, err
 	}
-	users, err := s.reader.QueryContext(ctx, `SELECT id,avatar FROM users WHERE avatar IS NOT NULL AND avatar!=''`)
+	users, err := s.queries().QueryContext(ctx, `SELECT id,avatar FROM users WHERE avatar IS NOT NULL AND avatar!=''`)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (s *Store) MissingResources(ctx context.Context) ([]ResourceTarget, error) 
 	if err != nil {
 		return nil, err
 	}
-	guilds, err := s.reader.QueryContext(ctx, `SELECT id,icon FROM guilds WHERE icon IS NOT NULL AND icon!=''`)
+	guilds, err := s.queries().QueryContext(ctx, `SELECT id,icon FROM guilds WHERE icon IS NOT NULL AND icon!=''`)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (s *Store) MissingResources(ctx context.Context) ([]ResourceTarget, error) 
 	if err != nil {
 		return nil, err
 	}
-	emojis, err := s.reader.QueryContext(ctx, `SELECT DISTINCT emoji_id,animated FROM reaction_totals WHERE emoji_id!=''`)
+	emojis, err := s.queries().QueryContext(ctx, `SELECT DISTINCT emoji_id,animated FROM reaction_totals WHERE emoji_id!=''`)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (s *Store) MissingResources(ctx context.Context) ([]ResourceTarget, error) 
 	if err != nil {
 		return nil, err
 	}
-	contents, err := s.reader.QueryContext(ctx, `SELECT content FROM messages WHERE content LIKE '%<:%' OR content LIKE '%<a:%'`)
+	contents, err := s.queries().QueryContext(ctx, `SELECT content FROM messages WHERE content LIKE '%<:%' OR content LIKE '%<a:%'`)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func (s *Store) MissingResources(ctx context.Context) ([]ResourceTarget, error) 
 	for _, target := range targets {
 		if strings.HasPrefix(target.Path, "/attachments/") {
 			var cached int
-			err := s.reader.QueryRowContext(ctx, `SELECT 1 FROM resource_urls WHERE host IN ('cdn.discordapp.com','media.discordapp.net') AND path=? LIMIT 1`, target.Path).Scan(&cached)
+			err := s.queries().QueryRowContext(ctx, `SELECT 1 FROM resource_urls WHERE host IN ('cdn.discordapp.com','media.discordapp.net') AND path=? LIMIT 1`, target.Path).Scan(&cached)
 			if err == nil {
 				continue
 			}
@@ -161,7 +161,7 @@ func (s *Store) MissingResources(ctx context.Context) ([]ResourceTarget, error) 
 			}
 			stem := target.Path[:period+1]
 			var cached int
-			err := s.reader.QueryRowContext(ctx, `SELECT 1 FROM resource_urls WHERE host IN ('cdn.discordapp.com','media.discordapp.net') AND substr(path,1,length(?))=? LIMIT 1`, stem, stem).Scan(&cached)
+			err := s.queries().QueryRowContext(ctx, `SELECT 1 FROM resource_urls WHERE host IN ('cdn.discordapp.com','media.discordapp.net') AND substr(path,1,length(?))=? LIMIT 1`, stem, stem).Scan(&cached)
 			if err == nil {
 				foundVariant = true
 				break
@@ -174,7 +174,7 @@ func (s *Store) MissingResources(ctx context.Context) ([]ResourceTarget, error) 
 			continue
 		}
 		var exists int
-		err := s.reader.QueryRowContext(ctx, "SELECT 1 FROM resource_urls WHERE host=? AND path=?", target.Host, target.Path).Scan(&exists)
+		err := s.queries().QueryRowContext(ctx, "SELECT 1 FROM resource_urls WHERE host=? AND path=?", target.Host, target.Path).Scan(&exists)
 		if err == nil {
 			continue
 		}

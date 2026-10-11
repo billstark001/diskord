@@ -123,3 +123,43 @@ func TestReactionsFromSnapshotsAndEvents(t *testing.T) {
 		t.Fatalf("reaction users: %+v, %v", b, err)
 	}
 }
+
+func TestOrderedGuildSettingsProjection(t *testing.T) {
+	for _, raw := range []string{
+		`{"op":0,"t":"READY","d":{"user_settings":{"guild_folders":[{"guild_ids":["9","1"],"name":"DO-NOT-SAVE"}],"token":"DO-NOT-SAVE"}}}`,
+		`{"op":0,"t":"USER_SETTINGS_UPDATE","d":{"guild_positions":["9","1"],"token":"DO-NOT-SAVE"}}`,
+	} {
+		b, err := Gateway([]byte(raw))
+		if err != nil || !b.HasGuildOrder || len(b.GuildOrder) != 2 || b.GuildOrder[0] != "9" || b.Empty() {
+			t.Fatal(b, err)
+		}
+		encoded, _ := json.Marshal(b)
+		if strings.Contains(string(encoded), "DO-NOT-SAVE") {
+			t.Fatal("settings leaked", string(encoded))
+		}
+	}
+	b, err := Gateway([]byte(`{"op":0,"t":"USER_SETTINGS_UPDATE","d":{"theme":"dark","guild_folders":null}}`))
+	if err != nil || !b.Empty() {
+		t.Fatal(b, err)
+	}
+}
+
+func TestMalformedGuildOrderDoesNotClearNavigation(t *testing.T) {
+	for _, settings := range []string{
+		`{"guild_folders":[{}]}`, `{"guild_folders":[null]}`, `{"guild_folders":[42]}`,
+		`{"guild_folders":[{"guild_ids":["9",null]}]}`,
+		`{"guild_folders":[{"guild_ids":["9","bad"]}]}`,
+		`{"guild_positions":["9",42]}`, `{"guild_positions":["9",null]}`,
+	} {
+		b, err := Gateway([]byte(`{"op":0,"t":"USER_SETTINGS_UPDATE","d":` + settings + `}`))
+		if err != nil || b.HasGuildOrder || !b.Empty() {
+			t.Fatalf("malformed settings changed order: %s: %+v, %v", settings, b, err)
+		}
+	}
+	for _, settings := range []string{`{"guild_folders":[]}`, `{"guild_positions":[]}`} {
+		b, err := Gateway([]byte(`{"op":0,"t":"USER_SETTINGS_UPDATE","d":` + settings + `}`))
+		if err != nil || !b.HasGuildOrder || len(b.GuildOrder) != 0 {
+			t.Fatalf("explicit empty order ignored: %+v, %v", b, err)
+		}
+	}
+}

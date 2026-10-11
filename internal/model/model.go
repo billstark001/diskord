@@ -64,6 +64,8 @@ type ReactionChange struct {
 }
 type Batch struct {
 	Source          string
+	GuildOrder      []string
+	HasGuildOrder   bool
 	Users           []User
 	Guilds          []Guild
 	Channels        []Channel
@@ -73,7 +75,7 @@ type Batch struct {
 }
 
 func (b Batch) Empty() bool {
-	return len(b.Users)+len(b.Guilds)+len(b.Channels)+len(b.Members)+len(b.Messages)+len(b.ReactionChanges) == 0
+	return !b.HasGuildOrder && len(b.Users)+len(b.Guilds)+len(b.Channels)+len(b.Members)+len(b.Messages)+len(b.ReactionChanges) == 0
 }
 func ID(s string) bool {
 	if len(s) == 0 || len(s) > 20 {

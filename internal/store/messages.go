@@ -139,12 +139,12 @@ func (s *Store) queryMessages(ctx context.Context, f model.Filter, comparison, c
 		order = "DESC"
 	}
 	query := `SELECT m.id,COALESCE(m.channel_id,''),` + channelDisplayNameSQL + `,COALESCE(c.guild_id,''),COALESCE(c.kind,-1),COALESCE(g.name,c.guild_id,''),
-		COALESCE(u.display_name,u.username,u.id,''),COALESCE(m.content,''),COALESCE(m.created_at,''),COALESCE(m.edited_at,''),m.source,m.deleted,
+		` + userDisplayNameSQL + `,COALESCE(m.content,''),COALESCE(m.created_at,''),COALESCE(m.edited_at,''),m.source,m.deleted,
 		COALESCE((SELECT ru.hash FROM resource_urls ru WHERE ru.host IN ('cdn.discordapp.com','media.discordapp.net')
 		AND substr(ru.path,1,length('/avatars/'||u.id||'/'||u.avatar||'.'))='/avatars/'||u.id||'/'||u.avatar||'.' LIMIT 1),'')
 		FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN guilds g ON g.id=c.guild_id
 		LEFT JOIN users u ON u.id=m.author_id WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.sort_key ` + order + ` LIMIT ?`
-	rows, err := s.reader.QueryContext(ctx, query, args...)
+	rows, err := s.queries().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -171,9 +171,7 @@ func (s *Store) queryMessages(ctx context.Context, f model.Filter, comparison, c
 }
 
 func (s *Store) enrichMessage(ctx context.Context, message *model.MessageRow) error {
-	attachments, err := s.reader.QueryContext(ctx, `SELECT a.name,
-		COALESCE((SELECT r.hash FROM resource_urls r WHERE r.host=a.host AND r.path=a.path),
-		(SELECT r.hash FROM resource_urls r WHERE r.host IN ('cdn.discordapp.com','media.discordapp.net') AND r.path=a.path LIMIT 1),'')
+	attachments, err := s.queries().QueryContext(ctx, `SELECT a.name,`+attachmentHashSQL+`
 		FROM attachments a WHERE a.message_id=? ORDER BY a.id`, message.ID)
 	if err != nil {
 		return err
@@ -209,7 +207,7 @@ func (s *Store) enrichInline(ctx context.Context, message *model.MessageRow) err
 				continue
 			}
 			var name string
-			err := s.reader.QueryRowContext(ctx, "SELECT COALESCE(NULLIF(display_name,''),NULLIF(username,''),id) FROM users WHERE id=?", match[1]).Scan(&name)
+			err := s.queries().QueryRowContext(ctx, "SELECT COALESCE(NULLIF(display_name,''),NULLIF(username,''),id) FROM users WHERE id=?", match[1]).Scan(&name)
 			if err != nil && err != sql.ErrNoRows {
 				return err
 			}
@@ -224,7 +222,7 @@ func (s *Store) enrichInline(ctx context.Context, message *model.MessageRow) err
 				continue
 			}
 			var name string
-			err := s.reader.QueryRowContext(ctx, "SELECT COALESCE(NULLIF(name,''),id) FROM channels WHERE id=?", match[3]).Scan(&name)
+			err := s.queries().QueryRowContext(ctx, "SELECT COALESCE(NULLIF(name,''),id) FROM channels WHERE id=?", match[3]).Scan(&name)
 			if err != nil && err != sql.ErrNoRows {
 				return err
 			}
@@ -237,7 +235,7 @@ func (s *Store) enrichInline(ctx context.Context, message *model.MessageRow) err
 			}
 			var hash string
 			prefix := "/emojis/" + match[4] + "."
-			err := s.reader.QueryRowContext(ctx, `SELECT hash FROM resource_urls WHERE host IN ('cdn.discordapp.com','media.discordapp.net')
+			err := s.queries().QueryRowContext(ctx, `SELECT hash FROM resource_urls WHERE host IN ('cdn.discordapp.com','media.discordapp.net')
 			AND substr(path,1,length(?))=? LIMIT 1`, prefix, prefix).Scan(&hash)
 			if err != nil && err != sql.ErrNoRows {
 				return err

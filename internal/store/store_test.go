@@ -340,7 +340,7 @@ func TestSchemaV1UpgradesToReactions(t *testing.T) {
 	}
 	defer s.Close()
 	var version int
-	if err := s.reader.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != 4 {
+	if err := s.reader.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil || version != SchemaVersion {
 		t.Fatalf("migration version %d: %v", version, err)
 	}
 }

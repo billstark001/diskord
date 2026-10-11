@@ -252,6 +252,32 @@ func (p *parser) message(o object, channel string, deleted bool) {
 	}
 }
 
+// Only an explicit ordered guild-ID list crosses the settings boundary.
+func (p *parser) guildOrder(o object) {
+	var folders []struct {
+		GuildIDs []string `json:"guild_ids"`
+	}
+	var order []string
+	validFolders := json.Unmarshal(o["guild_folders"], &folders) == nil && folders != nil
+	for _, folder := range folders {
+		validFolders = validFolders && folder.GuildIDs != nil
+		order = append(order, folder.GuildIDs...)
+	}
+	if !validFolders {
+		if json.Unmarshal(o["guild_positions"], &order) != nil || order == nil {
+			return
+		}
+	}
+	for _, id := range order {
+		if !model.ID(id) {
+			return
+		}
+	}
+	// A malformed partial list must not erase the previously observed order.
+	p.b.HasGuildOrder = true
+	p.b.GuildOrder = order
+}
+
 func Gateway(data []byte) (model.Batch, error) {
 	var envelope struct {
 		Op *int            `json:"op"`
@@ -268,6 +294,7 @@ func Gateway(data []byte) (model.Batch, error) {
 	o := obj(envelope.D)
 	switch envelope.T {
 	case "READY":
+		p.guildOrder(obj(o["user_settings"]))
 		p.user(obj(o["user"]))
 		for _, u := range arr(o["users"]) {
 			p.user(obj(u))
@@ -342,6 +369,8 @@ func Gateway(data []byte) (model.Batch, error) {
 		for _, m := range arr(o["members"]) {
 			p.member(obj(m), str(o["guild_id"]))
 		}
+	case "USER_SETTINGS_UPDATE":
+		p.guildOrder(o)
 	case "USER_UPDATE":
 		p.user(o)
 	}

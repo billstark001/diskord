@@ -26,13 +26,27 @@ import (
 //go:embed schema.sql
 var schema string
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 type Store struct {
 	writer, reader *sql.DB
 	Root           string
 	assetBytes     int64
 	assetMu        sync.Mutex
+	snapshot       *sql.Tx
+	schemaVersion  int
+}
+
+type queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (s *Store) queries() queryer {
+	if s.snapshot != nil {
+		return s.snapshot
+	}
+	return s.reader
 }
 
 func Open(root string) (*Store, error) {
@@ -182,9 +196,31 @@ func Open(root string) (*Store, error) {
 		}
 		version = 4
 	}
+	if version == 4 {
+		tx, err := w.Begin()
+		if err != nil {
+			return fail(err)
+		}
+		for _, statement := range []string{
+			"CREATE TABLE IF NOT EXISTS guild_positions(guild_id TEXT PRIMARY KEY REFERENCES guilds(id),position INTEGER NOT NULL)",
+			"UPDATE schema_version SET version=5 WHERE version=4",
+		} {
+			if _, err = tx.Exec(statement); err != nil {
+				tx.Rollback()
+				return fail(err)
+			}
+		}
+		if err = tx.Commit(); err != nil {
+			return fail(err)
+		}
+		version = 5
+	}
+
 	if version != SchemaVersion {
 		return fail(errors.New("unsupported database schema version"))
 	}
+	q.Add("_pragma", "query_only(1)")
+	u.RawQuery = q.Encode()
 	r, e := sql.Open("sqlite", u.String())
 	if e != nil {
 		return fail(e)
@@ -212,8 +248,18 @@ func Open(root string) (*Store, error) {
 	}
 	return s, nil
 }
+func (s *Store) DatabaseSchema() int {
+	if s.schemaVersion != 0 {
+		return s.schemaVersion
+	}
+	return SchemaVersion
+}
+
 func (s *Store) Close() error {
 	re := s.reader.Close()
+	if s.writer == nil {
+		return re
+	}
 	_, ce := s.writer.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	we := s.writer.Close()
 	return errors.Join(re, ce, we)
@@ -278,6 +324,9 @@ func reconcileChannelGuilds(tx *sql.Tx) error {
 	}
 }
 func (s *Store) Apply(ctx context.Context, b model.Batch) error {
+	if s.writer == nil {
+		return ErrReadOnly
+	}
 	tx, e := s.writer.BeginTx(ctx, nil)
 	if e != nil {
 		return e
@@ -302,6 +351,23 @@ func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 			return e
 		}
 	}
+	if b.HasGuildOrder {
+		if _, e = tx.Exec("DELETE FROM guild_positions"); e != nil {
+			return e
+		}
+		for i, id := range b.GuildOrder {
+			if !model.ID(id) {
+				continue
+			}
+			if e = stub(tx, "guilds", id); e != nil {
+				return e
+			}
+			if _, e = tx.Exec("INSERT OR IGNORE INTO guild_positions(guild_id,position) VALUES(?,?)", id, i); e != nil {
+				return e
+			}
+		}
+	}
+
 	for _, c := range b.Channels {
 		if !model.ID(c.ID) {
 			continue
@@ -484,17 +550,21 @@ func (s *Store) Apply(ctx context.Context, b model.Batch) error {
 }
 func (s *Store) Counts(ctx context.Context) (model.Counts, error) {
 	var c model.Counts
-	e := s.reader.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM users),(SELECT count(*) FROM guilds),(SELECT count(*) FROM channels),(SELECT count(*) FROM messages)").Scan(&c.Users, &c.Guilds, &c.Channels, &c.Messages)
+	e := s.queries().QueryRowContext(ctx, "SELECT (SELECT count(*) FROM users),(SELECT count(*) FROM guilds),(SELECT count(*) FROM channels),(SELECT count(*) FROM messages)").Scan(&c.Users, &c.Guilds, &c.Channels, &c.Messages)
 	return c, e
 }
 func (s *Store) Guilds(ctx context.Context) ([]model.GuildRow, error) {
-	rows, err := s.reader.QueryContext(ctx, `SELECT g.id, COALESCE(g.name,''), g.unavailable, g.deleted,
+	order := " ORDER BY length(g.id), g.id"
+	if s.DatabaseSchema() >= 5 {
+		order = " LEFT JOIN guild_positions gp ON gp.guild_id=g.id ORDER BY gp.position IS NULL,gp.position,length(g.id),g.id"
+	}
+	rows, err := s.queries().QueryContext(ctx, `SELECT g.id, COALESCE(g.name,''), g.unavailable, g.deleted,
 		COALESCE((SELECT r.hash FROM resource_urls r JOIN assets a ON a.hash=r.hash
 		WHERE r.host IN ('cdn.discordapp.com','media.discordapp.net')
 		AND substr(r.path,1,length('/icons/'||g.id||'/'))='/icons/'||g.id||'/'
 		AND (g.icon IS NULL OR substr(r.path,1,length('/icons/'||g.id||'/'||g.icon||'.'))='/icons/'||g.id||'/'||g.icon||'.')
 		ORDER BY a.observed_at DESC LIMIT 1),'')
-		FROM guilds g ORDER BY lower(COALESCE(g.name,g.id)), g.id`)
+		FROM guilds g`+order)
 	if err != nil {
 		return nil, err
 	}
@@ -525,13 +595,21 @@ func (s *Store) Channels(ctx context.Context, guildID string) ([]model.ChannelRo
 	if guildID != "" && !model.ID(guildID) {
 		return nil, errors.New("invalid guild ID")
 	}
-	query := `SELECT c.id, COALESCE(c.guild_id,''), COALESCE(c.parent_id,''), ` + channelDisplayNameSQL + ` AS display_name, COALESCE(c.kind,-1), c.position, c.deleted FROM channels c WHERE c.guild_id IS NULL AND c.kind IN (1,3) ORDER BY lower(display_name), c.id`
+	where := "c.guild_id IS NULL AND c.kind IN (1,3)"
+	order := channelActivitySortKeySQL + " DESC,length(c.id),c.id"
 	args := []any{}
 	if guildID != "" {
-		query = `SELECT c.id, COALESCE(c.guild_id,''), COALESCE(c.parent_id,''), ` + channelDisplayNameSQL + ` AS display_name, COALESCE(c.kind,-1), c.position, c.deleted FROM channels c WHERE c.guild_id=? ORDER BY c.position IS NULL, c.position, c.id`
+		where = "c.guild_id=?"
+		order = "c.position IS NULL,c.position,length(c.id),c.id"
 		args = append(args, guildID)
 	}
-	rows, err := s.reader.QueryContext(ctx, query, args...)
+	return s.readChannels(ctx, where, args, order)
+}
+
+func (s *Store) readChannels(ctx context.Context, where string, args []any, order string) ([]model.ChannelRow, error) {
+	query := `SELECT c.id,COALESCE(c.guild_id,''),COALESCE(c.parent_id,''),` + channelDisplayNameSQL + `,
+		COALESCE(c.kind,-1),c.position,c.deleted FROM channels c WHERE ` + where + ` ORDER BY ` + order
+	rows, err := s.queries().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -550,6 +628,9 @@ func (s *Store) Channels(ctx context.Context, guildID string) ([]model.ChannelRo
 var ErrQuota = errors.New("resource cache quota reached")
 
 func (s *Store) SaveAsset(ctx context.Context, host, path, mime string, data []byte, quota int64) error {
+	if s.writer == nil {
+		return ErrReadOnly
+	}
 	s.assetMu.Lock()
 	defer s.assetMu.Unlock()
 	ext := scope.ImageExtension(mime)
@@ -594,7 +675,7 @@ func (s *Store) Asset(ctx context.Context, hash string) (path, mime string, err 
 		return "", "", os.ErrNotExist
 	}
 	var ext string
-	if e := s.reader.QueryRowContext(ctx, "SELECT extension,mime FROM assets WHERE hash=?", hash).Scan(&ext, &mime); e != nil {
+	if e := s.queries().QueryRowContext(ctx, "SELECT extension,mime FROM assets WHERE hash=?", hash).Scan(&ext, &mime); e != nil {
 		return "", "", e
 	}
 	if scope.ImageExtension(mime) != ext {
