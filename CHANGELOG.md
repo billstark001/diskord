@@ -13,6 +13,7 @@ All notable changes to diskord are documented here. This file follows the [Keep 
 - CLI date-only and local-time bounds, full-day end dates, explicit timezone overrides, and observed server/private/channel/forum ordering; schema 5 stores typed guild order while offline reads retain schema 4 compatibility.
 - Versioned loopback read-only archive API with a separate bearer token, plus `api-token`, `status`, `channels`, and cursor-paged `messages` CLI commands.
 - Snapshot exports filtered by thread/channel and RFC3339 creation-time ranges, in Markdown or JSONL, optionally bundled with deduplicated cached attachment images, missing-attachment counts, and an export manifest in ZIP.
+- Whole-message Markdown splitting, optional Discord source-link rows, scope/date download filenames, and cached image embeds; split documents and deduplicated attachments share one ZIP with document counts and sizes.
 - Immutable offline queries and exports for stopped archives, without runtime initialization, schema migration, permission changes, or SQLite sidecar writes.
 
 ### Changed
@@ -27,6 +28,11 @@ All notable changes to diskord are documented here. This file follows the [Keep 
 - Reject explicit empty CLI selectors and disable channel exports for messages without an observed channel.
 - Reject date-only bounds whose midnight would be shifted or skipped by a timezone transition, and scope signal cancellation to archive commands.
 - Keep canceled browser downloads from resetting a later export, interrupt delivery on shutdown, and deliver each HTTP export as a complete snapshot without conditional or range responses.
+- Bound archive pages by JSON-escaped payload size, keep message bodies out of candidate sorting, and deduplicate mention/custom-emoji lookups by identity.
+- Normalize Markdown line separators while preserving JSONL text, stream message bodies with cancellation checks, and reserve cached attachment sizes before copying.
+- Honor UTF-8 download filenames, preserve the selected scope when a name cannot be used in a filename, and share HTTP error handling so non-JSON export failures retain their status.
+- Share select styling and reserve space for arrows; keep export dialog headers visible and form spacing consistent on smaller screens.
+- Synchronize canceled HTTP delivery callbacks before reusing connections, and verify ZIP completion and interrupted-export cleanup while capture continues.
 
 ## [0.2.0] - 2026-10-05
 

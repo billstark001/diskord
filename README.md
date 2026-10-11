@@ -18,7 +18,7 @@ Observe only local traffic from your own devices and accounts, or traffic for wh
 | Entities and relationships | Users, guilds, channels, and messages, with member, DM recipient, and attachment relationships; string IDs, sparse edits, and deletion markers. |
 | Raw traffic | **No raw database is created.** `capture.raw: true` produces an error instead of silently changing privacy behavior. |
 | Resources | Disabled by default. When enabled, allowlisted CDN images passing through the proxy are cached. Enabling it also retries previously observed missing CDN paths, with per-file and total size limits. |
-| Automation and export | Versioned loopback read-only API with a separate token; online/offline query CLI; thread/channel and creation-time selection; Markdown or JSONL exports, optionally packaged with cached attachment images in ZIP. |
+| Automation and export | Versioned loopback read-only API with a separate token; online/offline query CLI; thread/channel and creation-time selection; Markdown or JSONL exports with scope/date filenames, optional Markdown source links, and a single ZIP for split Markdown and/or cached attachment images. |
 | Platforms | Provides Windows/macOS build and integration instructions. Whether the client accepts proxy arguments and trusts the CA still requires testing. |
 
 This is an archive built from observed traffic, not a full client sync: historical messages the client never requested will not appear. Events with unsupported encodings or over size limits are skipped, and the console displays the relevant counters.
