@@ -2,6 +2,31 @@ import { signal } from "@preact/signals";
 import type { Locale } from "./api";
 
 export const strings = {
+  exportMessages: ["导出消息…", "Export messages…"],
+  exportTitle: ["导出本地消息", "Export local messages"],
+  exportScope: ["导出范围", "Export scope"],
+  exportCurrent: ["当前选择", "Current selection"],
+  exportAll: ["全部本地档案", "Entire local archive"],
+  exportSince: ["开始时间（包含）", "From (inclusive)"],
+  exportUntil: ["结束时间（不包含）", "Until (exclusive)"],
+  exportTimeHint: [
+    "使用本地时区；留空表示不限时间。",
+    "Local timezone; leave blank for an unbounded range.",
+  ],
+  exportFormat: ["文件格式", "File format"],
+  exportChildren: ["包含子频道与帖子", "Include child channels and threads"],
+  exportAttachments: ["包含已缓存附件（ZIP）", "Include cached attachments (ZIP)"],
+  exportHint: [
+    "导出最新的本地观测状态，包括删除标记；不会补抓缺失消息或附件，搜索条件不影响导出。",
+    "Exports latest locally observed states, including deletion markers. Missing messages and attachments are not fetched; search filters do not affect exports.",
+  ],
+  exportDownload: ["下载导出文件", "Download export"],
+  exportPreparing: ["正在准备下载…", "Preparing download…"],
+  exportInvalidTime: [
+    "时间范围无效，请检查开始和结束时间。",
+    "Invalid range; check the start and end times.",
+  ],
+  cancel: ["取消", "Cancel"],
   loginTitle: ["本地消息档案", "Local message archive"],
   loginHint: [
     "在本机终端执行 diskord ui-token 获取访问令牌。",

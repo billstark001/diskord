@@ -32,11 +32,14 @@ export function MessageItem({
     <article
       class={`${s.message} ${focused ? s.messageFocused : ""} ${onJump ? s.messageJumpable : ""}`}
       data-message-id={message.ID}
+      data-export={message.ChannelID ? "" : undefined}
+      data-export-thread={message.ChannelID}
+      data-export-name={message.ChannelName || message.ChannelID}
       onDblClick={onJump}
       onKeyDown={(event) => {
         if (onJump && event.target === event.currentTarget && event.key === "Enter") onJump();
       }}
-      tabIndex={onJump ? 0 : undefined}
+      tabIndex={onJump || message.ChannelID ? 0 : undefined}
       role={onJump ? "button" : undefined}
       title={onJump ? text("jumpToMessage") : undefined}
     >

@@ -15,17 +15,7 @@ type Props = {
 };
 
 function groupedChannels(channels: Channel[]) {
-  const ordered = [...channels].sort((a, b) => {
-    if (a.Position == null || b.Position == null) {
-      if (a.Position == null && b.Position != null) return 1;
-      if (a.Position != null && b.Position == null) return -1;
-    }
-    return (
-      (a.Position ?? 0) - (b.Position ?? 0) ||
-      a.ID.length - b.ID.length ||
-      (a.ID < b.ID ? -1 : a.ID === b.ID ? 0 : 1)
-    );
-  });
+  const ordered = channels;
   const categories = ordered.filter((item) => item.Kind === 4);
   const ids = new Set(channels.map((item) => item.ID));
   const roots = ordered.filter(
@@ -91,6 +81,10 @@ export function ChannelSidebar({
       <div class={s.sidebarScroll}>
         <button
           class={`${s.sidebarItem} ${!channel && page === "messages" ? s.sidebarSelected : ""}`}
+          data-export
+          data-export-guild={guild || undefined}
+          data-export-scope={scope || undefined}
+          data-export-name={header}
           onClick={() => onSelect("")}
         >
           {text("allChannels")}
@@ -100,7 +94,14 @@ export function ChannelSidebar({
             {roots.map((item) => channelBranch(item))}
             {categories.map((category) => (
               <div key={category.ID}>
-                <div class={s.category}>
+                <div
+                  class={s.category}
+                  tabIndex={0}
+                  data-export
+                  data-export-thread={category.ID}
+                  data-export-include-threads="true"
+                  data-export-name={channelName(category)}
+                >
                   {channelName(category)}
                   {category.Deleted ? ` · ${text("deleted")}` : ""}
                 </div>

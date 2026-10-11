@@ -18,6 +18,10 @@ export function ChannelButton({
   const forum = item.Kind === 15 || item.Kind === 16;
   return (
     <button
+      data-export
+      data-export-include-threads={forum ? "true" : undefined}
+      data-export-thread={item.ID}
+      data-export-name={channelName(item)}
       class={`${s.sidebarItem} ${active ? s.sidebarSelected : ""}`}
       title={`${channelName(item)}${item.Deleted ? ` · ${text("deleted")}` : ""}`}
       style={{ paddingLeft: `${12 + depth * 16}px` }}

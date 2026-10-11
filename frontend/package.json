@@ -6,7 +6,8 @@
   "packageManager": "pnpm@12.6.0",
   "scripts": {
     "build": "tsc --noEmit && vite build",
-    "check": "tsc --noEmit && oxfmt --check src vite.config.ts",
+    "check": "tsc --noEmit && pnpm run test && oxfmt --check src vite.config.ts",
+    "test": "node --test src/core/time.test.ts",
     "format": "oxfmt src vite.config.ts"
   },
   "dependencies": {

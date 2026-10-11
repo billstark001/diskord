@@ -14,6 +14,7 @@ import {
   guildName,
   channelName,
 } from "../core/navigation";
+import { ArchiveExport, openExport } from "./ArchiveExport";
 import { LanguageSelect } from "./LanguageSelect";
 import { ServerRail } from "./ServerRail";
 import { ChannelSidebar } from "./ChannelSidebar";
@@ -83,7 +84,7 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
     scroll.current?.scrollTo({ top: 0 });
   }, [currentPage]);
   return (
-    <div class={s.shell}>
+    <div class={s.shell} data-export-root>
       <ServerRail
         guilds={navigation.guilds}
         page={currentPage}
@@ -102,9 +103,35 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
         onSelect={(channel) => select({ guild: currentGuild, channel, scope: currentScope })}
       />
       <main class={s.main}>
-        <header class={s.top}>
+        <header
+          class={s.top}
+          data-export={currentPage === "messages" ? "" : undefined}
+          data-export-thread={currentChannel || undefined}
+          data-export-include-threads={
+            selectedChannel?.Kind === 15 || selectedChannel?.Kind === 16 ? "true" : undefined
+          }
+          data-export-guild={currentGuild || undefined}
+          data-export-scope={currentScope || undefined}
+          data-export-name={title}
+        >
           <h1 class={s.title}>{title}</h1>
           <span class={s.spacer} />
+          {currentPage === "messages" && (
+            <button
+              class={`${s.button} ${s.quietButton}`}
+              onClick={() =>
+                openExport({
+                  thread: currentChannel,
+                  includeThreads: selectedChannel?.Kind === 15 || selectedChannel?.Kind === 16,
+                  guild: currentGuild,
+                  scope: currentScope,
+                  name: title,
+                })
+              }
+            >
+              {text("exportMessages")}
+            </button>
+          )}
           <LanguageSelect csrf={csrf} compact />
           <button class={`${s.button} ${s.quietButton}`} onClick={() => void logout()}>
             {text("logout")}
@@ -147,6 +174,7 @@ export function ConsoleShell({ csrf, onLogout }: { csrf: string; onLogout: () =>
             />
           )}
         </section>
+        <ArchiveExport />
         <footer class={s.footer}>diskord · {text("archiveHint")}</footer>
       </main>
     </div>

@@ -84,7 +84,14 @@ export function ForumPage({ channel, onOpen }: { channel: string; onOpen: (id: s
       )}
       <div class={`${s.forumPosts} ${layout === "gallery" ? s.forumGallery : ""}`}>
         {posts.map((post: ForumPost) => (
-          <button key={post.ID} class={s.forumPost} onClick={() => onOpen(post.ID)}>
+          <button
+            data-export
+            data-export-thread={post.ID}
+            data-export-name={post.Name}
+            key={post.ID}
+            class={s.forumPost}
+            onClick={() => onOpen(post.ID)}
+          >
             <div class={s.forumPostText}>
               <div class={s.forumPostTitle}>
                 {post.Pinned && <span aria-label={text("pinned")}>📌 </span>}

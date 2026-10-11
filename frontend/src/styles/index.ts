@@ -5,4 +5,6 @@ import { archive } from "./archive.css";
 import { forms } from "./forms.css";
 import { forum } from "./forum.css";
 
-export const s = { ...layout, ...common, ...archive, ...forms, ...forum };
+import { overlays } from "./overlays.css";
+
+export const s = { ...layout, ...common, ...archive, ...forms, ...forum, ...overlays };

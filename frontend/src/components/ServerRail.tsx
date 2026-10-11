@@ -43,6 +43,8 @@ export function ServerRail({ guilds, page, guild, scope, onPage, onSelect }: Pro
       </button>
       <button
         class={`${s.railButton} ${page === "messages" && !guild && !scope ? s.railSelected : ""}`}
+        data-export
+        data-export-name={text("all")}
         title={text("all")}
         onClick={() => onSelect("", "")}
       >
@@ -50,6 +52,9 @@ export function ServerRail({ guilds, page, guild, scope, onPage, onSelect }: Pro
       </button>
       <button
         class={`${s.railButton} ${page === "messages" && scope === "dm" ? s.railSelected : ""}`}
+        data-export
+        data-export-scope="dm"
+        data-export-name={text("dm")}
         title={text("dm")}
         onClick={() => onSelect("", "dm")}
       >
@@ -59,6 +64,9 @@ export function ServerRail({ guilds, page, guild, scope, onPage, onSelect }: Pro
       {guilds.map((item) => (
         <button
           key={item.ID}
+          data-export
+          data-export-guild={item.ID}
+          data-export-name={guildName(item)}
           class={`${s.railButton} ${page === "messages" && guild === item.ID ? s.railSelected : ""}`}
           title={`${guildName(item)}${item.Deleted ? ` · ${text("deleted")}` : item.Unavailable ? ` · ${text("unavailable")}` : ""}`}
           onClick={() => onSelect(item.ID, "")}
