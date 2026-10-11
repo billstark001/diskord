@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"diskord/internal/model"
 )
@@ -145,6 +146,64 @@ func (s Selection) matches(m ArchiveMessage) bool {
 	return (s.Since == nil || !m.CreationTime.Before(*s.Since)) && (s.Until == nil || m.CreationTime.Before(*s.Until))
 }
 
+// Pages have a payload budget as well as a row limit. A single oversized
+// message is returned on its own so pagination never drops observed data.
+const MaxArchivePageBytes int64 = 8 << 20
+
+// Match encoding/json's escaping without allocating another copy of the body.
+func archiveTextBytes(s string) int64 {
+	size := int64(len(s))
+	for i, r := range s {
+		switch r {
+		case '"', '\\', '\b', '\f', '\n', '\r', '\t':
+			size++
+		case '<', '>', '&':
+			size += 5
+		case '\u2028', '\u2029':
+			size += 3
+		default:
+			if r < 0x20 {
+				size += 5
+			} else if r == utf8.RuneError {
+				if _, width := utf8.DecodeRuneInString(s[i:]); width == 1 {
+					size += 5
+				}
+			}
+		}
+	}
+	return size
+}
+
+func archiveMessageBytes(m ArchiveMessage) int64 {
+	size := int64(512)
+	for _, field := range []string{m.ID, m.ChannelID, m.ChannelName, m.GuildID, m.AuthorID, m.AuthorName, m.Source} {
+		size += archiveTextBytes(field)
+	}
+	for _, field := range []*string{m.Content, m.CreatedAt, m.EditedAt} {
+		if field != nil {
+			size += archiveTextBytes(*field)
+		}
+	}
+	return size + archiveEnrichmentBytes(m)
+}
+
+func archiveEnrichmentBytes(m ArchiveMessage) int64 {
+	var size int64
+	for _, a := range m.Attachments {
+		size += 256 + archiveTextBytes(a.ID) + archiveTextBytes(a.Name) + archiveTextBytes(a.Host) + archiveTextBytes(a.Path) + archiveTextBytes(a.CachedHash) + archiveTextBytes(a.ExportPath)
+	}
+	for _, r := range m.Reactions {
+		size += 256 + archiveTextBytes(r.EmojiID) + archiveTextBytes(r.EmojiName)
+		for _, name := range r.KnownUsers {
+			size += 32 + archiveTextBytes(name)
+		}
+	}
+	for key, name := range m.MentionNames {
+		size += 128 + archiveTextBytes(key) + archiveTextBytes(name)
+	}
+	return size
+}
+
 func (r *ArchiveReader) Page(ctx context.Context, selection Selection, after string, limit int) (ArchivePage, error) {
 	page := ArchivePage{SchemaVersion: 1, Selection: selection, Messages: []ArchiveMessage{}}
 	if limit < 1 || limit > 1000 || after != "" && !model.ID(after) {
@@ -152,49 +211,58 @@ func (r *ArchiveReader) Page(ctx context.Context, selection Selection, after str
 	}
 	// Timestamp filtering happens in Go: SQLite date functions round fractions,
 	// and the stored timestamps can have different offsets and precisions.
+	where := []string{"m.sort_key>?"}
+	args := []any{model.SortKey(after)}
+	if selection.ThreadID != "" {
+		if selection.IncludeThreads {
+			where = append(where, `m.channel_id IN (WITH RECURSIVE subtree(id) AS (SELECT ? UNION SELECT c.id FROM channels c JOIN subtree ON c.parent_id=subtree.id) SELECT id FROM subtree)`)
+		} else {
+			where = append(where, "m.channel_id=?")
+		}
+		args = append(args, selection.ThreadID)
+	}
+	if selection.GuildID != "" {
+		where = append(where, "c.guild_id=?")
+		args = append(args, selection.GuildID)
+	}
+	if selection.Scope == "dm" {
+		where = append(where, "c.guild_id IS NULL AND c.kind IN (1,3)")
+	}
+
+	var pageBytes int64
 	for {
-		where := []string{"m.sort_key>?"}
-		args := []any{model.SortKey(after)}
-		if selection.ThreadID != "" {
-			if selection.IncludeThreads {
-				where = append(where, `m.channel_id IN (WITH RECURSIVE subtree(id) AS (SELECT ? UNION SELECT c.id FROM channels c JOIN subtree ON c.parent_id=subtree.id) SELECT id FROM subtree)`)
-			} else {
-				where = append(where, "m.channel_id=?")
-			}
-			args = append(args, selection.ThreadID)
-		}
-		if selection.GuildID != "" {
-			where = append(where, "c.guild_id=?")
-			args = append(args, selection.GuildID)
-		}
-		if selection.Scope == "dm" {
-			where = append(where, "c.guild_id IS NULL AND c.kind IN (1,3)")
-		}
-		rows, err := r.tx.QueryContext(ctx, `SELECT m.id,COALESCE(m.channel_id,''),`+channelDisplayNameSQL+`,
-			COALESCE(c.guild_id,''),COALESCE(m.author_id,''),`+userDisplayNameSQL+`,
-			m.content,m.created_at,m.edited_at,m.kind,m.deleted,m.revision,m.observed_at,m.source
-			FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN users u ON u.id=m.author_id
+		// Guild/scope filters can make SQLite sort candidates in memory. Keep
+		// bodies out of that sort and load one selected message at a time.
+		rows, err := r.tx.QueryContext(ctx, `SELECT m.id,m.created_at
+			FROM messages m LEFT JOIN channels c ON c.id=m.channel_id
 			WHERE `+strings.Join(where, " AND ")+` ORDER BY m.sort_key LIMIT 256`, args...)
 		if err != nil {
 			return page, err
 		}
-		batch := []ArchiveMessage{}
+		type candidate struct {
+			id        string
+			createdAt *string
+		}
+		candidates := []candidate{}
 		for rows.Next() {
-			var m ArchiveMessage
-			if err := rows.Scan(&m.ID, &m.ChannelID, &m.ChannelName, &m.GuildID, &m.AuthorID, &m.AuthorName,
-				&m.Content, &m.CreatedAt, &m.EditedAt, &m.Kind, &m.Deleted, &m.Revision, &m.ObservedAtMS, &m.Source); err != nil {
+			var c candidate
+			if err := rows.Scan(&c.id, &c.createdAt); err != nil {
 				rows.Close()
 				return page, err
 			}
-			batch = append(batch, m)
+			candidates = append(candidates, c)
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
 			return page, err
 		}
-		for _, m := range batch {
-			after = m.ID
+		for _, c := range candidates {
+			if err := ctx.Err(); err != nil {
+				return page, err
+			}
+			args[0] = model.SortKey(c.id)
+			m := ArchiveMessage{ID: c.id, CreatedAt: c.createdAt}
 			creationTime(&m)
 			if !selection.matches(m) {
 				continue
@@ -203,12 +271,31 @@ func (r *ArchiveReader) Page(ctx context.Context, selection Selection, after str
 				page.NextAfter = page.Messages[len(page.Messages)-1].ID
 				return page, nil
 			}
+			if err := r.tx.QueryRowContext(ctx, `SELECT COALESCE(m.channel_id,''),`+channelDisplayNameSQL+`,
+				COALESCE(c.guild_id,''),COALESCE(m.author_id,''),`+userDisplayNameSQL+`,
+				m.content,m.edited_at,m.kind,m.deleted,m.revision,m.observed_at,m.source
+				FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN users u ON u.id=m.author_id
+				WHERE m.id=?`, m.ID).Scan(&m.ChannelID, &m.ChannelName, &m.GuildID, &m.AuthorID, &m.AuthorName,
+				&m.Content, &m.EditedAt, &m.Kind, &m.Deleted, &m.Revision, &m.ObservedAtMS, &m.Source); err != nil {
+				return page, err
+			}
+			baseBytes := archiveMessageBytes(m)
+			if len(page.Messages) > 0 && pageBytes+baseBytes > MaxArchivePageBytes {
+				page.NextAfter = page.Messages[len(page.Messages)-1].ID
+				return page, nil
+			}
 			if err := r.enrich(ctx, &m); err != nil {
 				return page, err
 			}
+			size := baseBytes + archiveEnrichmentBytes(m)
+			if len(page.Messages) > 0 && pageBytes+size > MaxArchivePageBytes {
+				page.NextAfter = page.Messages[len(page.Messages)-1].ID
+				return page, nil
+			}
 			page.Messages = append(page.Messages, m)
+			pageBytes += size
 		}
-		if len(batch) < 256 {
+		if len(candidates) < 256 {
 			return page, nil
 		}
 	}

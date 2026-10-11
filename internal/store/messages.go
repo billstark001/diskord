@@ -199,48 +199,63 @@ func (s *Store) enrichMessage(ctx context.Context, message *model.MessageRow) er
 func (s *Store) enrichInline(ctx context.Context, message *model.MessageRow) error {
 	message.MentionNames = map[string]string{}
 	message.EmojiHashes = map[string]string{}
-	for _, match := range messageToken.FindAllStringSubmatch(message.Content, -1) {
-		switch {
-		case match[1] != "":
-			key := "user:" + match[1]
-			if _, seen := message.MentionNames[key]; seen {
-				continue
+	remaining := message.Content
+	seenTokens := map[string]bool{}
+	for remaining != "" {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		indices := messageToken.FindStringSubmatchIndex(remaining)
+		if indices == nil {
+			break
+		}
+		var kind int
+		var id string
+		for i := 1; i < len(indices)/2; i++ {
+			if indices[2*i] >= 0 {
+				kind, id = i, remaining[indices[2*i]:indices[2*i+1]]
+				break
 			}
+		}
+		remaining = remaining[indices[1]:]
+		// Do not allocate every repeated mention at once or query an unknown
+		// identity again for each occurrence. User/emoji spelling variants share
+		// the same lookup, including identities that have not been observed.
+		key := [...]string{"", "user:", "role:", "channel:", "emoji:"}[kind] + id
+		if seenTokens[key] {
+			continue
+		}
+		seenTokens[key] = true
+		switch kind {
+		case 1:
 			var name string
-			err := s.queries().QueryRowContext(ctx, "SELECT COALESCE(NULLIF(display_name,''),NULLIF(username,''),id) FROM users WHERE id=?", match[1]).Scan(&name)
+			err := s.queries().QueryRowContext(ctx, "SELECT COALESCE(NULLIF(display_name,''),NULLIF(username,''),id) FROM users WHERE id=?", id).Scan(&name)
 			if err != nil && err != sql.ErrNoRows {
 				return err
 			}
 			if err == nil {
 				message.MentionNames[key] = name
 			}
-		case match[2] != "":
-			message.MentionNames["role:"+match[2]] = "role " + match[2]
-		case match[3] != "":
-			key := "channel:" + match[3]
-			if _, seen := message.MentionNames[key]; seen {
-				continue
-			}
+		case 2:
+			message.MentionNames[key] = "role " + id
+		case 3:
 			var name string
-			err := s.queries().QueryRowContext(ctx, "SELECT COALESCE(NULLIF(name,''),id) FROM channels WHERE id=?", match[3]).Scan(&name)
+			err := s.queries().QueryRowContext(ctx, "SELECT COALESCE(NULLIF(name,''),id) FROM channels WHERE id=?", id).Scan(&name)
 			if err != nil && err != sql.ErrNoRows {
 				return err
 			}
 			if err == nil {
 				message.MentionNames[key] = name
 			}
-		case match[4] != "":
-			if _, seen := message.EmojiHashes[match[4]]; seen {
-				continue
-			}
+		case 4:
 			var hash string
-			prefix := "/emojis/" + match[4] + "."
+			prefix := "/emojis/" + id + "."
 			err := s.queries().QueryRowContext(ctx, `SELECT hash FROM resource_urls WHERE host IN ('cdn.discordapp.com','media.discordapp.net')
 			AND substr(path,1,length(?))=? LIMIT 1`, prefix, prefix).Scan(&hash)
 			if err != nil && err != sql.ErrNoRows {
 				return err
 			}
-			message.EmojiHashes[match[4]] = hash
+			message.EmojiHashes[id] = hash
 		}
 	}
 	return nil

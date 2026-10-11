@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +32,112 @@ func archiveFixture(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+func TestArchivePageByteBudgetPreservesLargeMessages(t *testing.T) {
+	db := archiveFixture(t)
+	ctx := context.Background()
+	content := strings.Repeat("x", 512<<10)
+	batch := model.Batch{Source: "ws"}
+	for i := 1; i <= 20; i++ {
+		batch.Messages = append(batch.Messages, model.Message{ID: strconv.Itoa(i), ChannelID: model.Ptr("2"), Content: &content})
+	}
+	batch.Messages = append(batch.Messages, model.Message{ID: "21", ChannelID: model.Ptr("2"), Content: model.Ptr(strings.Repeat("y", 9<<20))})
+	if err := db.Apply(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	r, err := db.BeginArchive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	after := ""
+	count, pages := 0, 0
+	for {
+		page, err := r.Page(ctx, Selection{}, after, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		var bytes int64
+		for _, message := range page.Messages {
+			count++
+			if message.ID != strconv.Itoa(count) {
+				t.Fatal("byte-limited pagination skipped or duplicated a message", message.ID, count)
+			}
+			bytes += int64(len(*message.Content))
+		}
+		if bytes > MaxArchivePageBytes && len(page.Messages) != 1 {
+			t.Fatal("oversized message was not isolated", bytes, len(page.Messages))
+		}
+		if page.NextAfter == "" {
+			break
+		}
+		after = page.NextAfter
+	}
+	if count != 21 || pages < 3 {
+		t.Fatal("payload budget did not split the complete archive", count, pages)
+	}
+}
+
+func TestLongRepeatedMentionsAreEnrichedAndCancelable(t *testing.T) {
+	db := archiveFixture(t)
+	ctx := context.Background()
+	if err := db.Apply(ctx, model.Batch{Source: "ws", Users: []model.User{{ID: "9", Username: model.Ptr("Alice")}}}); err != nil {
+		t.Fatal(err)
+	}
+	m := model.MessageRow{Content: strings.Repeat("<@9> <@!9> <@99> <@!99> <#99> <:missing:88> <a:renamed:88> ", 20000)}
+	if err := db.enrichInline(ctx, &m); err != nil || m.MentionNames["user:9"] != "Alice" || len(m.MentionNames) != 1 || len(m.EmojiHashes) != 1 {
+		t.Fatal("long message enrichment lost observed identities", m.MentionNames, err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := db.enrichInline(canceled, &m); err != context.Canceled {
+		t.Fatal("long message enrichment ignored cancellation", err)
+	}
+}
+
+func TestArchivePageBudgetIncludesJSONEscaping(t *testing.T) {
+	db := archiveFixture(t)
+	ctx := context.Background()
+	body := strings.Repeat("\x00<\"\\\u2028", 128<<10)
+	batch := model.Batch{Source: "ws"}
+	for i := 1; i <= 6; i++ {
+		batch.Messages = append(batch.Messages, model.Message{ID: strconv.Itoa(i), Content: &body})
+	}
+	if err := db.Apply(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	r, err := db.BeginArchive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	after, count, pages := "", 0, 0
+	for {
+		page, err := r.Page(ctx, Selection{}, after, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(page)
+		if err != nil || int64(len(encoded)) > MaxArchivePageBytes {
+			t.Fatalf("escaped page exceeds payload budget: %d bytes, %v", len(encoded), err)
+		}
+		for _, message := range page.Messages {
+			count++
+			if message.ID != strconv.Itoa(count) || message.Content == nil || *message.Content != body {
+				t.Fatal("escaping-aware pagination lost or changed a message", message.ID)
+			}
+		}
+		pages++
+		if page.NextAfter == "" {
+			break
+		}
+		after = page.NextAfter
+	}
+	if count != 6 || pages < 3 {
+		t.Fatal("escaped messages were not paginated", count, pages)
+	}
 }
 
 func TestArchiveRangePaginationAndSnapshot(t *testing.T) {
