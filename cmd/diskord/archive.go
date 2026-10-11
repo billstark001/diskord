@@ -54,8 +54,9 @@ func addArchiveCommands(root *cobra.Command, configPath *string) {
 			return err
 		}})
 	for _, operation := range []string{"status", "guilds", "dms", "channels", "threads", "messages", "export"} {
-		var offline, attachments, includeThreads bool
+		var offline, attachments, includeThreads, sourceLinks bool
 		var thread, threadName, since, until, after, guild, scope, format, output string
+		var splitMiB int64
 		var limit int
 		cmd := &cobra.Command{Use: operation, Short: "Read local archive " + operation, Args: cobra.NoArgs}
 		cmd.Flags().BoolVar(&offline, "offline", false, "read a stopped archive without modifying its runtime")
@@ -81,6 +82,8 @@ func addArchiveCommands(root *cobra.Command, configPath *string) {
 		if operation == "export" {
 			cmd.Flags().StringVar(&format, "format", "md", "md or jsonl")
 			cmd.Flags().BoolVar(&attachments, "attachments", false, "include cached attachment images in a ZIP")
+			cmd.Flags().Int64Var(&splitMiB, "split-mib", 0, "split Markdown at whole-message boundaries near this size (1..8192 MiB); produces one ZIP")
+			cmd.Flags().BoolVar(&sourceLinks, "source-links", true, "include Discord message/channel/author links in Markdown (JSONL always retains IDs)")
 			cmd.Flags().StringVar(&output, "output", "-", "new output file outside the source runtime; '-' writes text to stdout")
 		}
 		cmd.RunE = func(cmd *cobra.Command, _ []string) error {
@@ -108,13 +111,16 @@ func addArchiveCommands(root *cobra.Command, configPath *string) {
 			if guild != "" && !model.ID(guild) || operation == "messages" && (limit < 1 || limit > 1000 || after != "" && !model.ID(after)) {
 				return errors.New("invalid guild ID, cursor, or page limit")
 			}
-			options := archive.Options{Format: format, Attachments: attachments}
+			if splitMiB < 0 || splitMiB > 8192 {
+				return errors.New("--split-mib must be 0 (disabled) or 1..8192")
+			}
+			options := archive.Options{Format: format, Attachments: attachments, SplitBytes: splitMiB * (1 << 20), SourceLinks: sourceLinks}
 			if operation == "export" {
 				if err := options.Validate(); err != nil {
 					return err
 				}
-				if output == "-" && (offline || attachments) {
-					return errors.New("offline or attachment export requires --output FILE outside the source runtime")
+				if output == "-" && (offline || options.ZIP()) {
+					return errors.New("offline or ZIP export requires --output FILE outside the source runtime")
 				}
 			}
 			c, runtimeRoot, err := readRuntime(*configPath)
@@ -176,6 +182,8 @@ func addArchiveCommands(root *cobra.Command, configPath *string) {
 				} else {
 					q.Set("format", format)
 					q.Set("attachments", strconv.FormatBool(attachments))
+					q.Set("source_links", strconv.FormatBool(sourceLinks))
+					q.Set("split_bytes", strconv.FormatInt(options.SplitBytes, 10))
 				}
 			}
 			response, err := archiveRequest(ctx, c, runtimeRoot, operation, q)

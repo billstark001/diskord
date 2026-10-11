@@ -78,6 +78,7 @@ type ArchiveMessage struct {
 	ID           string              `json:"id"`
 	ChannelID    string              `json:"channel_id"`
 	ChannelName  string              `json:"channel_name"`
+	ChannelKind  int                 `json:"channel_kind"`
 	GuildID      string              `json:"guild_id"`
 	AuthorID     string              `json:"author_id"`
 	AuthorName   string              `json:"author_name"`
@@ -271,11 +272,11 @@ func (r *ArchiveReader) Page(ctx context.Context, selection Selection, after str
 				page.NextAfter = page.Messages[len(page.Messages)-1].ID
 				return page, nil
 			}
-			if err := r.tx.QueryRowContext(ctx, `SELECT COALESCE(m.channel_id,''),`+channelDisplayNameSQL+`,
+			if err := r.tx.QueryRowContext(ctx, `SELECT COALESCE(m.channel_id,''),`+channelDisplayNameSQL+`,COALESCE(c.kind,-1),
 				COALESCE(c.guild_id,''),COALESCE(m.author_id,''),`+userDisplayNameSQL+`,
 				m.content,m.edited_at,m.kind,m.deleted,m.revision,m.observed_at,m.source
 				FROM messages m LEFT JOIN channels c ON c.id=m.channel_id LEFT JOIN users u ON u.id=m.author_id
-				WHERE m.id=?`, m.ID).Scan(&m.ChannelID, &m.ChannelName, &m.GuildID, &m.AuthorID, &m.AuthorName,
+				WHERE m.id=?`, m.ID).Scan(&m.ChannelID, &m.ChannelName, &m.ChannelKind, &m.GuildID, &m.AuthorID, &m.AuthorName,
 				&m.Content, &m.EditedAt, &m.Kind, &m.Deleted, &m.Revision, &m.ObservedAtMS, &m.Source); err != nil {
 				return page, err
 			}
@@ -346,4 +347,27 @@ func (r *ArchiveReader) enrich(ctx context.Context, m *ArchiveMessage) error {
 
 func (r *ArchiveReader) Asset(ctx context.Context, hash string) (string, string, error) {
 	return r.store.Asset(ctx, hash)
+}
+
+// SelectionName reads the observed label from the same export snapshot.
+func (r *ArchiveReader) SelectionName(ctx context.Context, selection Selection) (string, error) {
+	var name string
+	var err error
+	switch {
+	case selection.ThreadID != "":
+		err = r.tx.QueryRowContext(ctx, `SELECT `+channelDisplayNameSQL+` FROM channels c WHERE c.id=?`, selection.ThreadID).Scan(&name)
+		if err == sql.ErrNoRows {
+			return "channel", nil
+		}
+	case selection.GuildID != "":
+		err = r.tx.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(name,''),id) FROM guilds WHERE id=?`, selection.GuildID).Scan(&name)
+		if err == sql.ErrNoRows {
+			return "guild", nil
+		}
+	case selection.Scope == "dm":
+		name = "private-conversations"
+	default:
+		name = "all-messages"
+	}
+	return name, err
 }

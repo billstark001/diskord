@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -130,6 +131,12 @@ func TestArchiveAPIBoundariesAndQueries(t *testing.T) {
 		{"GET", "/api/v1/messages?thread=2&thread=3", u.apiToken, "127.0.0.1:3900", "", 400},
 		{"GET", "/api/v1/export?format=html", u.apiToken, "127.0.0.1:3900", "", 400},
 		{"GET", "/api/v1/export?attachments=perhaps", u.apiToken, "127.0.0.1:3900", "", 400},
+		{"GET", "/api/v1/export?source_links=perhaps", u.apiToken, "127.0.0.1:3900", "", 400},
+		{"GET", "/api/v1/export?source_links=true&source_links=false", u.apiToken, "127.0.0.1:3900", "", 400},
+		{"GET", "/api/v1/export?split_bytes=-1", u.apiToken, "127.0.0.1:3900", "", 400},
+		{"GET", "/api/v1/export?split_bytes=abc", u.apiToken, "127.0.0.1:3900", "", 400},
+		{"GET", "/api/v1/export?split_bytes=1048576&split_bytes=2097152", u.apiToken, "127.0.0.1:3900", "", 400},
+		{"GET", "/api/v1/export?format=jsonl&split_bytes=1048576", u.apiToken, "127.0.0.1:3900", "", 400},
 		{"GET", "/api/v1/export?raw=true", u.apiToken, "127.0.0.1:3900", "", 400},
 		{"GET", "/api/v1/channels?guild=invalid", u.apiToken, "127.0.0.1:3900", "", 400},
 	} {
@@ -325,6 +332,62 @@ func TestConsoleExportAndSharedNavigation(t *testing.T) {
 		}
 		if w.Code == 200 && strings.Contains(tt.path, "scope=dm") && strings.Contains(w.Body.String(), "hello") {
 			t.Fatal("DM scope included a guild message")
+		}
+	}
+}
+
+func TestExportSourceLinkSelection(t *testing.T) {
+	u, handler := apiFixture(t)
+	for _, tt := range []struct {
+		query string
+		links bool
+	}{{"", true}, {"&source_links=true", true}, {"&source_links=false", false}} {
+		r := httptest.NewRequest("GET", "http://127.0.0.1:3900/api/v1/export?format=md"+tt.query, nil)
+		r.RemoteAddr = "127.0.0.1:4567"
+		r.Header.Set("Authorization", "Bearer "+u.apiToken)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != 200 || strings.Contains(w.Body.String(), "Message:") != tt.links || tt.links && !strings.Contains(w.Body.String(), "https://discord.com/channels/1/2/10") {
+			t.Fatal(tt.query, w.Code, w.Body.String())
+		}
+	}
+	r := httptest.NewRequest("GET", "http://127.0.0.1:3900/api/v1/export?format=jsonl&source_links=false", nil)
+	r.RemoteAddr = "127.0.0.1:4567"
+	r.Header.Set("Authorization", "Bearer "+u.apiToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"channel_id":"2"`) || !strings.Contains(w.Body.String(), `"id":"10"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestAPISplitAndUnicodeDownloadFilename(t *testing.T) {
+	u, handler := apiFixture(t)
+	if err := u.Store.Apply(context.Background(), model.Batch{Source: "ws", Channels: []model.Channel{{ID: "2", Name: model.Ptr("讨论频道/unsafe\u2028")}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, attachments := range []string{"false", "true"} {
+		r := httptest.NewRequest("GET", "http://127.0.0.1:3900/api/v1/export?thread=2&split_bytes=1048576&attachments="+attachments, nil)
+		r.RemoteAddr = "127.0.0.1:4567"
+		r.Header.Set("Authorization", "Bearer "+u.apiToken)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		_, params, err := mime.ParseMediaType(w.Header().Get("Content-Disposition"))
+		name := params["filename"]
+		if w.Code != 200 || err != nil || !strings.Contains(name, "讨论频道-unsafe-2_from-2026-10-01") || !strings.HasSuffix(name, ".zip") || strings.ContainsAny(name, "/\\\u2028") {
+			t.Fatal(w.Code, name, err)
+		}
+		z, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range z.File {
+			if strings.HasSuffix(f.Name, ".zip") {
+				t.Fatal("nested zip", f.Name)
+			}
+		}
+		if len(z.File) != 2 {
+			t.Fatal(z.File)
 		}
 	}
 }

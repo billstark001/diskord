@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -260,7 +261,7 @@ func (u *UI) archiveMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) archiveExport(w http.ResponseWriter, r *http.Request) {
-	q, err := archiveQuery(r, "thread", "guild", "scope", "include_threads", "since", "until", "format", "attachments")
+	q, err := archiveQuery(r, "thread", "guild", "scope", "include_threads", "since", "until", "format", "attachments", "source_links", "split_bytes")
 	if err != nil {
 		problem(w, 400, err.Error())
 		return
@@ -270,15 +271,25 @@ func (u *UI) archiveExport(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, err.Error())
 		return
 	}
-	options := archive.Options{Format: q.Get("format")}
+	options := archive.Options{Format: q.Get("format"), SourceLinks: true}
 	if options.Format == "" {
 		options.Format = "md"
 	}
 	if q.Get("attachments") != "" {
 		options.Attachments, err = strconv.ParseBool(q.Get("attachments"))
 	}
+	if _, present := q["source_links"]; present {
+		var linkErr error
+		options.SourceLinks, linkErr = strconv.ParseBool(q.Get("source_links"))
+		err = errors.Join(err, linkErr)
+	}
+	if _, present := q["split_bytes"]; present {
+		var splitErr error
+		options.SplitBytes, splitErr = strconv.ParseInt(q.Get("split_bytes"), 10, 64)
+		err = errors.Join(err, splitErr)
+	}
 	if err != nil || options.Validate() != nil {
-		problem(w, 400, "invalid format or attachments flag")
+		problem(w, 400, "invalid format, attachments, source_links, or split_bytes option")
 		return
 	}
 	select {
@@ -314,10 +325,20 @@ func (u *UI) archiveExport(w http.ResponseWriter, r *http.Request) {
 	_ = controller.SetWriteDeadline(time.Now().Add(5 * time.Minute))
 	// Shutdown cancels request contexts; interrupt a blocked socket write as
 	// well so staged files are removed before the service exits.
-	stopCancellation := context.AfterFunc(r.Context(), func() { _ = controller.SetWriteDeadline(time.Now()) })
-	defer stopCancellation()
+	cancellationDone := make(chan struct{})
+	stopCancellation := context.AfterFunc(r.Context(), func() {
+		defer close(cancellationDone)
+		_ = controller.SetWriteDeadline(time.Now())
+	})
+	defer func() {
+		// Do not let a cancellation callback outlive this response and race with
+		// net/http reusing the connection for a subsequent request.
+		if !stopCancellation() {
+			<-cancellationDone
+		}
+	}()
 	w.Header().Set("Content-Type", a.ContentType)
-	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(a.Filename))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": a.Filename}))
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	// Every request builds a new snapshot. Conditional/range delivery could
 	// otherwise return an empty file or splice different snapshots on resume.

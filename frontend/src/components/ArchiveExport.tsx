@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { text } from "../core/i18n";
 import { params } from "../core/api";
+import { exportFilename } from "../core/export";
 import { localTimeBound } from "../core/time";
 import { Dialog } from "../primitives/Dialog";
 import { Menu } from "../primitives/Menu";
@@ -26,6 +27,9 @@ export function ArchiveExport() {
   const [format, setFormat] = useState("md");
   const [includeThreads, setIncludeThreads] = useState(false);
   const [attachments, setAttachments] = useState(false);
+  const [split, setSplit] = useState(false);
+  const [splitMiB, setSplitMiB] = useState("4");
+  const [sourceLinks, setSourceLinks] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const controller = useRef<AbortController | null>(null);
@@ -99,6 +103,12 @@ export function ArchiveExport() {
     const to = String(fields.get("until") || "");
     const selectedFormat = String(fields.get("format") || "md");
     const selectedAttachments = fields.has("attachments");
+    const selectedSplit = selectedFormat === "md" && fields.has("split_markdown");
+    const sizeMiB = Number(fields.get("split_mib"));
+    if (selectedSplit && (!Number.isInteger(sizeMiB) || sizeMiB < 1 || sizeMiB > 8192)) {
+      setError(text("exportInvalidSplit"));
+      return;
+    }
     const bounds: Record<string, string> = {};
     try {
       if (from) bounds.since = localTimeBound(from);
@@ -123,6 +133,8 @@ export function ArchiveExport() {
           ...bounds,
           format: selectedFormat,
           attachments: String(selectedAttachments),
+          split_bytes: String(selectedSplit ? sizeMiB * 1048576 : 0),
+          source_links: String(selectedFormat === "md" && fields.has("source_links")),
         })}`,
         { credentials: "same-origin", cache: "no-store", signal: abort.signal },
       );
@@ -135,7 +147,12 @@ export function ArchiveExport() {
       url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = selectedAttachments ? "archive.zip" : `messages.${selectedFormat}`;
+      anchor.download = exportFilename(
+        response.headers.get("Content-Disposition"),
+        selectedAttachments || selectedSplit
+          ? "diskord-export.zip"
+          : `diskord-export.${selectedFormat}`,
+      );
       document.body.append(anchor);
       anchor.click();
       anchor.remove();
@@ -240,6 +257,53 @@ export function ArchiveExport() {
               <option value="jsonl">JSONL</option>
             </select>
           </div>
+          {format === "md" && (
+            <label class={s.switch}>
+              <input
+                type="checkbox"
+                name="source_links"
+                checked={sourceLinks}
+                disabled={busy}
+                onChange={(event) => setSourceLinks(event.currentTarget.checked)}
+              />
+              {text("exportSourceLinks")}
+            </label>
+          )}
+          {format === "md" && (
+            <>
+              <label class={s.switch}>
+                <input
+                  type="checkbox"
+                  name="split_markdown"
+                  checked={split}
+                  disabled={busy}
+                  onChange={(event) => setSplit(event.currentTarget.checked)}
+                />
+                {text("exportSplit")}
+              </label>
+              {split && (
+                <div class={s.field}>
+                  <label class={s.label} for="export-split-mib">
+                    {text("exportSplitSize")}
+                  </label>
+                  <input
+                    id="export-split-mib"
+                    name="split_mib"
+                    class={`${s.input} ${s.fullInput}`}
+                    type="number"
+                    min="1"
+                    max="8192"
+                    step="1"
+                    required
+                    value={splitMiB}
+                    disabled={busy}
+                    onInput={(event) => setSplitMiB(event.currentTarget.value)}
+                  />
+                  <p class={s.muted}>{text("exportSplitHint")}</p>
+                </div>
+              )}
+            </>
+          )}
           {scope === "current" && target?.thread && (
             <label class={s.switch}>
               <input

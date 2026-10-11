@@ -16,6 +16,20 @@ export const strings = {
   exportFormat: ["文件格式", "File format"],
   exportChildren: ["包含子频道与帖子", "Include child channels and threads"],
   exportAttachments: ["包含已缓存附件（ZIP）", "Include cached attachments (ZIP)"],
+  exportSplit: ["分片导出 Markdown（ZIP）", "Split Markdown into parts (ZIP)"],
+  exportSplitSize: ["每片目标大小（MiB）", "Target part size (MiB)"],
+  exportSplitHint: [
+    "按完整消息切分；单条超大消息独占一片。分片和附件共用一个 ZIP。",
+    "Parts preserve whole messages; oversized messages get their own part. Parts and attachments share one ZIP.",
+  ],
+  exportInvalidSplit: [
+    "分片大小须为 1–8192 MiB 的整数。",
+    "Part size must be a whole number from 1 to 8192 MiB.",
+  ],
+  exportSourceLinks: [
+    "包含消息、频道与作者的 Discord 链接行",
+    "Include the Discord message, channel, and author link row",
+  ],
   exportHint: [
     "导出最新的本地观测状态，包括删除标记；不会补抓缺失消息或附件，搜索条件不影响导出。",
     "Exports latest locally observed states, including deletion markers. Missing messages and attachments are not fetched; search filters do not affect exports.",
