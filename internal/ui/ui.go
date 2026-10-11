@@ -78,7 +78,10 @@ type UI struct {
 	Store                *store.Store
 	server               *http.Server
 	listener             net.Listener
+	cancelRequests       context.CancelFunc
 	token, session, csrf string
+	apiToken             string
+	exportSlot           chan struct{}
 	changeMu, loginMu    sync.Mutex
 	loginStart           time.Time
 	loginCount           int
@@ -106,7 +109,13 @@ func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store, backg
 		return nil, err
 	}
 	u := &UI{Manager: m, Authority: a, Engine: e, Store: s, token: token, session: session, csrf: csrf}
+	u.apiToken, err = ensureAPIToken(m.Root)
+	if err != nil {
+		return nil, err
+	}
+	u.exportSlot = make(chan struct{}, 1)
 	mux := http.NewServeMux()
+	u.archiveRoutes(mux)
 	web, err := fs.Sub(frontend, "webdist")
 	if err != nil {
 		return nil, err
@@ -150,6 +159,7 @@ func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store, backg
 	mux.Handle("GET /api/overview", u.auth(http.HandlerFunc(u.overview)))
 	mux.Handle("GET /api/navigation", u.auth(http.HandlerFunc(u.navigation)))
 	mux.Handle("GET /api/forum", u.auth(http.HandlerFunc(u.forum)))
+	mux.Handle("GET /api/export", u.auth(http.HandlerFunc(u.archiveExport)))
 	mux.Handle("GET /api/messages", u.auth(http.HandlerFunc(u.messages)))
 	mux.Handle("GET /api/settings", u.auth(http.HandlerFunc(u.settings)))
 	mux.Handle("POST /api/settings", u.auth(http.HandlerFunc(u.saveSettings)))
@@ -161,11 +171,20 @@ func New(m *config.Manager, a *ca.Live, e *capture.Engine, s *store.Store, backg
 		return nil, err
 	}
 	u.listener = ln
-	u.server = &http.Server{Handler: u.security(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 75 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024, ErrorLog: log.New(log.Writer(), "http: ", 0)}
+	requestContext, cancel := context.WithCancel(context.Background())
+	u.cancelRequests = cancel
+	u.server = &http.Server{Handler: u.security(mux), BaseContext: func(net.Listener) context.Context { return requestContext }, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 75 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024, ErrorLog: log.New(log.Writer(), "http: ", 0)}
 	return u, nil
 }
-func (u *UI) Serve() error                    { return u.server.Serve(u.listener) }
-func (u *UI) Close(ctx context.Context) error { _ = u.listener.Close(); return u.server.Shutdown(ctx) }
+func (u *UI) Serve() error { return u.server.Serve(u.listener) }
+func (u *UI) Close(ctx context.Context) error {
+	if u.cancelRequests != nil {
+		u.cancelRequests()
+	}
+	err := u.server.Shutdown(ctx)
+	_ = u.listener.Close()
+	return err
+}
 
 func (u *UI) security(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -319,20 +338,18 @@ func (u *UI) navigation(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	guilds, err := u.Store.Guilds(ctx)
+	nav, err := u.Store.Navigation(ctx)
 	if err != nil {
 		problem(w, 503, "navigation unavailable")
 		return
 	}
 	channels := []model.ChannelRow{}
-	if guildID != "" || scope == "dm" {
-		channels, err = u.Store.Channels(ctx, guildID)
-		if err != nil {
-			problem(w, 503, "navigation unavailable")
-			return
+	for _, c := range nav.Channels {
+		if guildID != "" && c.GuildID == guildID || guildID == "" && scope == "dm" && c.GuildID == "" && (c.Kind == 1 || c.Kind == 3) {
+			channels = append(channels, c)
 		}
 	}
-	writeJSON(w, 200, map[string]any{"guilds": guilds, "channels": channels})
+	writeJSON(w, 200, map[string]any{"guilds": nav.Guilds, "channels": channels})
 }
 func (u *UI) forum(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("channel")
