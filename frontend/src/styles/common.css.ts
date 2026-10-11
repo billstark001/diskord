@@ -1,6 +1,17 @@
 import { style } from "@vanilla-extract/css";
 import { vars } from "./theme.css";
 
+const input = style({
+  background: vars.color.surface,
+  color: vars.color.ink,
+  border: `1px solid ${vars.color.line}`,
+  borderRadius: 8,
+  padding: "10px 12px",
+  minHeight: 39,
+  minWidth: 0,
+  ":focus": { borderColor: vars.color.accent },
+});
+
 export const common = {
   toolbar: style({
     display: "flex",
@@ -9,16 +20,26 @@ export const common = {
     alignItems: "center",
     marginBottom: 20,
   }),
-  input: style({
-    background: vars.color.surface,
-    color: vars.color.ink,
-    border: `1px solid ${vars.color.line}`,
-    borderRadius: 8,
-    padding: "10px 12px",
-    minHeight: 39,
-    minWidth: 0,
-    ":focus": { borderColor: vars.color.accent },
-  }),
+  input,
+  select: style([
+    input,
+    {
+      appearance: "none",
+      paddingRight: 36,
+      backgroundImage:
+        "linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%)",
+      backgroundPosition: "calc(100% - 16px) 50%, calc(100% - 12px) 50%",
+      backgroundSize: "4px 4px",
+      backgroundRepeat: "no-repeat",
+      "@media": {
+        "(forced-colors: active)": {
+          appearance: "auto",
+          backgroundImage: "none",
+          paddingRight: 12,
+        },
+      },
+    },
+  ]),
   searchInput: style({ flex: "1 1 260px" }),
   button: style({
     border: 0,
@@ -55,6 +76,7 @@ export const common = {
     fontWeight: 650,
   }),
   field: style({ marginBottom: 18 }),
+  formHint: style({ color: vars.color.muted, fontSize: 12, lineHeight: 1.5, margin: "8px 0 0" }),
   formRow: style({ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end" }),
   fullInput: style({ width: "100%" }),
   notice: style({

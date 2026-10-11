@@ -1,4 +1,5 @@
-import { globalStyle, style } from "@vanilla-extract/css";
+import { style } from "@vanilla-extract/css";
+import { common } from "./common.css";
 import { vars } from "./theme.css";
 
 export const forum = {
@@ -26,6 +27,15 @@ export const forum = {
     color: vars.color.muted,
     fontSize: 12,
   }),
+  forumSelect: style([
+    common.select,
+    {
+      backgroundColor: vars.color.raised,
+      borderRadius: 7,
+      minHeight: 32,
+      padding: "7px 36px 7px 8px",
+    },
+  ]),
   forumPosts: style({ display: "flex", flexDirection: "column", gap: 12 }),
   forumGallery: style({
     display: "grid",
@@ -85,11 +95,3 @@ export const forum = {
   }),
   forumFootnote: style({ color: vars.color.muted, fontSize: 11, marginTop: 22 }),
 };
-
-globalStyle(`${forum.forumControl} select`, {
-  color: vars.color.ink,
-  background: vars.color.raised,
-  border: `1px solid ${vars.color.line}`,
-  borderRadius: 7,
-  padding: "7px 8px",
-});

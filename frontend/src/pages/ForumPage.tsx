@@ -59,6 +59,7 @@ export function ForumPage({ channel, onOpen }: { channel: string; onOpen: (id: s
         <label class={s.forumControl}>
           {text("sortPosts")}
           <select
+            class={s.forumSelect}
             value={sort}
             onChange={(event) => setSort(event.currentTarget.value as "activity" | "creation")}
           >
@@ -69,6 +70,7 @@ export function ForumPage({ channel, onOpen }: { channel: string; onOpen: (id: s
         <label class={s.forumControl}>
           {text("viewPosts")}
           <select
+            class={s.forumSelect}
             value={layout}
             onChange={(event) => setLayout(event.currentTarget.value as "list" | "gallery")}
           >

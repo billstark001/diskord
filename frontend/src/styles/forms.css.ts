@@ -1,4 +1,4 @@
-import { style } from "@vanilla-extract/css";
+import { globalStyle, style } from "@vanilla-extract/css";
 import { vars } from "./theme.css";
 
 export const forms = {
@@ -28,5 +28,7 @@ export const forms = {
     gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))",
     gap: 14,
   }),
-  switch: style({ display: "flex", alignItems: "center", gap: 9 }),
+  switch: style({ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.5 }),
 };
+
+globalStyle(`${forms.switch} input`, { flexShrink: 0, margin: 0 });

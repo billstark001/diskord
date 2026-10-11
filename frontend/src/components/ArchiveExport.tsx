@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { text } from "../core/i18n";
-import { params } from "../core/api";
+import { params, request } from "../core/api";
 import { exportFilename } from "../core/export";
 import { localTimeBound } from "../core/time";
 import { Dialog } from "../primitives/Dialog";
@@ -124,7 +124,7 @@ export function ArchiveExport() {
     setError("");
     let url = "";
     try {
-      const response = await fetch(
+      const response = await request(
         `/api/export?${params({
           thread: selected.thread || "",
           include_threads: String(!!selected.thread && fields.has("include_threads")),
@@ -136,12 +136,8 @@ export function ArchiveExport() {
           split_bytes: String(selectedSplit ? sizeMiB * 1048576 : 0),
           source_links: String(selectedFormat === "md" && fields.has("source_links")),
         })}`,
-        { credentials: "same-origin", cache: "no-store", signal: abort.signal },
+        { signal: abort.signal },
       );
-      if (!response.ok) {
-        const body = (await response.json()) as { error?: string };
-        throw new Error(body.error || `HTTP ${response.status}`);
-      }
       const blob = await response.blob();
       if (abort.signal.aborted) return;
       url = URL.createObjectURL(blob);
@@ -197,7 +193,8 @@ export function ArchiveExport() {
             <select
               id="export-scope"
               name="scope"
-              class={`${s.input} ${s.fullInput}`}
+              autoFocus
+              class={`${s.select} ${s.fullInput}`}
               value={scope}
               disabled={busy}
               onChange={(event) => setScope(event.currentTarget.value)}
@@ -208,39 +205,41 @@ export function ArchiveExport() {
               <option value="all">{text("exportAll")}</option>
             </select>
           </div>
-          <div class={s.exportDates}>
-            <div class={s.field}>
-              <label class={s.label} for="export-since">
-                {text("exportSince")}
-              </label>
-              <input
-                id="export-since"
-                name="since"
-                class={`${s.input} ${s.fullInput}`}
-                type="datetime-local"
-                step="1"
-                value={since}
-                disabled={busy}
-                onInput={(event) => setSince(event.currentTarget.value)}
-              />
+          <div class={s.field}>
+            <div class={s.exportDates}>
+              <div>
+                <label class={s.label} for="export-since">
+                  {text("exportSince")}
+                </label>
+                <input
+                  id="export-since"
+                  name="since"
+                  class={`${s.input} ${s.fullInput}`}
+                  type="datetime-local"
+                  step="1"
+                  value={since}
+                  disabled={busy}
+                  onInput={(event) => setSince(event.currentTarget.value)}
+                />
+              </div>
+              <div>
+                <label class={s.label} for="export-until">
+                  {text("exportUntil")}
+                </label>
+                <input
+                  id="export-until"
+                  name="until"
+                  class={`${s.input} ${s.fullInput}`}
+                  type="datetime-local"
+                  step="1"
+                  value={until}
+                  disabled={busy}
+                  onInput={(event) => setUntil(event.currentTarget.value)}
+                />
+              </div>
             </div>
-            <div class={s.field}>
-              <label class={s.label} for="export-until">
-                {text("exportUntil")}
-              </label>
-              <input
-                id="export-until"
-                name="until"
-                class={`${s.input} ${s.fullInput}`}
-                type="datetime-local"
-                step="1"
-                value={until}
-                disabled={busy}
-                onInput={(event) => setUntil(event.currentTarget.value)}
-              />
-            </div>
+            <p class={s.formHint}>{text("exportTimeHint")}</p>
           </div>
-          <p class={s.muted}>{text("exportTimeHint")}</p>
           <div class={s.field}>
             <label class={s.label} for="export-format">
               {text("exportFormat")}
@@ -248,7 +247,7 @@ export function ArchiveExport() {
             <select
               id="export-format"
               name="format"
-              class={`${s.input} ${s.fullInput}`}
+              class={`${s.select} ${s.fullInput}`}
               value={format}
               disabled={busy}
               onChange={(event) => setFormat(event.currentTarget.value)}
@@ -257,75 +256,77 @@ export function ArchiveExport() {
               <option value="jsonl">JSONL</option>
             </select>
           </div>
-          {format === "md" && (
-            <label class={s.switch}>
-              <input
-                type="checkbox"
-                name="source_links"
-                checked={sourceLinks}
-                disabled={busy}
-                onChange={(event) => setSourceLinks(event.currentTarget.checked)}
-              />
-              {text("exportSourceLinks")}
-            </label>
-          )}
-          {format === "md" && (
-            <>
+          <div class={s.exportOptions}>
+            {format === "md" && (
               <label class={s.switch}>
                 <input
                   type="checkbox"
-                  name="split_markdown"
-                  checked={split}
+                  name="source_links"
+                  checked={sourceLinks}
                   disabled={busy}
-                  onChange={(event) => setSplit(event.currentTarget.checked)}
+                  onChange={(event) => setSourceLinks(event.currentTarget.checked)}
                 />
-                {text("exportSplit")}
+                {text("exportSourceLinks")}
               </label>
-              {split && (
-                <div class={s.field}>
-                  <label class={s.label} for="export-split-mib">
-                    {text("exportSplitSize")}
-                  </label>
+            )}
+            {format === "md" && (
+              <>
+                <label class={s.switch}>
                   <input
-                    id="export-split-mib"
-                    name="split_mib"
-                    class={`${s.input} ${s.fullInput}`}
-                    type="number"
-                    min="1"
-                    max="8192"
-                    step="1"
-                    required
-                    value={splitMiB}
+                    type="checkbox"
+                    name="split_markdown"
+                    checked={split}
                     disabled={busy}
-                    onInput={(event) => setSplitMiB(event.currentTarget.value)}
+                    onChange={(event) => setSplit(event.currentTarget.checked)}
                   />
-                  <p class={s.muted}>{text("exportSplitHint")}</p>
-                </div>
-              )}
-            </>
-          )}
-          {scope === "current" && target?.thread && (
+                  {text("exportSplit")}
+                </label>
+                {split && (
+                  <div>
+                    <label class={s.label} for="export-split-mib">
+                      {text("exportSplitSize")}
+                    </label>
+                    <input
+                      id="export-split-mib"
+                      name="split_mib"
+                      class={`${s.input} ${s.fullInput}`}
+                      type="number"
+                      min="1"
+                      max="8192"
+                      step="1"
+                      required
+                      value={splitMiB}
+                      disabled={busy}
+                      onInput={(event) => setSplitMiB(event.currentTarget.value)}
+                    />
+                    <p class={s.formHint}>{text("exportSplitHint")}</p>
+                  </div>
+                )}
+              </>
+            )}
+            {scope === "current" && target?.thread && (
+              <label class={s.switch}>
+                <input
+                  type="checkbox"
+                  name="include_threads"
+                  checked={includeThreads}
+                  disabled={busy}
+                  onChange={(event) => setIncludeThreads(event.currentTarget.checked)}
+                />
+                {text("exportChildren")}
+              </label>
+            )}
             <label class={s.switch}>
               <input
                 type="checkbox"
-                name="include_threads"
-                checked={includeThreads}
+                name="attachments"
+                checked={attachments}
                 disabled={busy}
-                onChange={(event) => setIncludeThreads(event.currentTarget.checked)}
+                onChange={(event) => setAttachments(event.currentTarget.checked)}
               />
-              {text("exportChildren")}
+              {text("exportAttachments")}
             </label>
-          )}
-          <label class={s.switch}>
-            <input
-              type="checkbox"
-              name="attachments"
-              checked={attachments}
-              disabled={busy}
-              onChange={(event) => setAttachments(event.currentTarget.checked)}
-            />
-            {text("exportAttachments")}
-          </label>
+          </div>
           {error && (
             <p class={`${s.notice} ${s.error}`} role="alert">
               {error}

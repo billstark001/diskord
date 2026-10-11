@@ -107,16 +107,15 @@ export type Settings = {
   discordLoggerEnabled: boolean;
 };
 
-export async function api<T>(path: string, init?: RequestInit, csrf?: string): Promise<T> {
+export async function request(path: string, init?: RequestInit, csrf?: string): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  if (init?.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (csrf) headers.set("X-CSRF-Token", csrf);
   const response = await fetch(path, {
     credentials: "same-origin",
     cache: "no-store",
     ...init,
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(csrf ? { "X-CSRF-Token": csrf } : {}),
-      ...init?.headers,
-    },
+    headers,
   });
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
@@ -128,7 +127,11 @@ export async function api<T>(path: string, init?: RequestInit, csrf?: string): P
     }
     throw new Error(message);
   }
-  return response.json() as Promise<T>;
+  return response;
+}
+
+export async function api<T>(path: string, init?: RequestInit, csrf?: string): Promise<T> {
+  return (await request(path, init, csrf)).json() as Promise<T>;
 }
 
 export function params(values: Record<string, string>) {

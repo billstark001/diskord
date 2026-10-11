@@ -54,15 +54,19 @@ export function Dialog({
           onClose();
       }}
     >
-      <h2 id={`${id}-title`} class={s.dialogTitle}>
-        {title}
-      </h2>
-      {description && (
-        <p id={`${id}-description`} class={s.muted}>
-          {description}
-        </p>
-      )}
-      {children}
+      <header class={s.dialogHeader}>
+        <h2 id={`${id}-title`} class={s.dialogTitle}>
+          {title}
+        </h2>
+        {description && (
+          <p id={`${id}-description`} class={s.dialogDescription}>
+            {description}
+          </p>
+        )}
+      </header>
+      <div class={s.dialogBody} tabIndex={-1}>
+        {children}
+      </div>
     </dialog>
   );
 }

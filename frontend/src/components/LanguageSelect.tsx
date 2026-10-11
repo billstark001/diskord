@@ -22,7 +22,7 @@ export function LanguageSelect({ csrf, compact = false }: { csrf: string; compac
         {text("language")}
       </label>
       <select
-        class={s.input}
+        class={s.select}
         id="language"
         value={locale.value}
         onChange={(e) => void change(e.currentTarget.value as Locale)}
