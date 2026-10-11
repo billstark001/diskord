@@ -88,6 +88,10 @@ func TestReadOnlySchemaFourNavigation(t *testing.T) {
 		t.Fatal(nav, err)
 	}
 	ro.Close()
+	// Windows locks prevent reading the locked byte range for the file digest.
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if !reflect.DeepEqual(before, runtimeState(t, db.Root)) {
 		t.Fatal("legacy read changed files")
 	}

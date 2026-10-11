@@ -33,6 +33,7 @@ All notable changes to diskord are documented here. This file follows the [Keep 
 - Honor UTF-8 download filenames, preserve the selected scope when a name cannot be used in a filename, and share HTTP error handling so non-JSON export failures retain their status.
 - Share select styling and reserve space for arrows; keep export dialog headers visible and form spacing consistent on smaller screens.
 - Synchronize canceled HTTP delivery callbacks before reusing connections, and verify ZIP completion and interrupted-export cleanup while capture continues.
+- Keep archive regression tests reliable on slower CI disks and release Windows file locks before verifying unchanged runtime files.
 
 ## [0.2.0] - 2026-10-05
 

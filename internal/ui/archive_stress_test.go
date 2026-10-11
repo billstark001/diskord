@@ -115,22 +115,30 @@ func TestLiveExportCompletionAndInterruption(t *testing.T) {
 	}
 
 	// Keep capture writes active during preparation, ZIP work, and delivery.
-	writesDone := make(chan struct{})
+	writesCtx, stopWrites := context.WithCancel(ctx)
 	writeStopped := make(chan struct{})
+	var submitted atomic.Uint64
 	go func() {
 		defer close(writeStopped)
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
-		for i := 100000; ; i++ {
+		for i := 100000; ; {
 			select {
-			case <-writesDone:
+			case <-writesCtx.Done():
 				return
 			case <-ticker.C:
+				// Keep at most one write outstanding: slow CI disks should test
+				// export interference, without saturating the best-effort queue.
+				if engine.Metrics.BatchesCommitted.Load() < submitted.Load() {
+					continue
+				}
 				engine.Submit(model.Batch{Source: "ws", Messages: []model.Message{{ID: fmt.Sprint(i), ChannelID: model.Ptr("3"), Content: model.Ptr("concurrent capture")}}})
+				submitted.Add(1)
+				i++
 			}
 		}
 	}()
-	defer func() { close(writesDone); <-writeStopped }()
+	defer func() { stopWrites(); <-writeStopped }()
 
 	// Sample live heap, excluding fixture setup and reading the finished output.
 	runtime.GC()
@@ -328,8 +336,11 @@ func TestLiveExportCompletionAndInterruption(t *testing.T) {
 		t.Fatal(r.Status, err)
 	}
 	waitClean()
+	stopWrites()
+	<-writeStopped
+	engine.Close()
 	metrics := engine.Metrics.Snapshot()
-	if metrics.BatchesCommitted == 0 || metrics.StoreErrors != 0 || metrics.DroppedBatches != 0 {
+	if metrics.BatchesCommitted == 0 || metrics.BatchesCommitted != submitted.Load() || metrics.StoreErrors != 0 || metrics.DroppedBatches != 0 {
 		t.Fatal("capture disrupted", metrics)
 	}
 	t.Logf("ZIP preparation canceled; socket delivery aborted; staging and slot released; concurrent capture committed %d batches without errors", metrics.BatchesCommitted)
